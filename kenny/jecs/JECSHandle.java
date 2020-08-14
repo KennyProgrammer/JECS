@@ -70,7 +70,7 @@ import kenny.jecs.collection.EntityContainerImpl;
  * @author Danil (Kenny) Dukhovenko 
  */
 @JECSHandle.JECSApi
-public class JECSHandle<Component extends Object> 
+public class JECSHandle<Component extends Object> implements Runnable
 {	
 	/**
 	 * Recognizes the Java Entity Component system API. Indicates that each method or variable 
@@ -320,11 +320,17 @@ public class JECSHandle<Component extends Object>
 	@Deprecated
 	private JECSHandle() 
 	{
+		Thread jecsThread = new Thread(this, "JECSThread");
+		jecsThread.start();
+		
 		entities = new ArrayList<Integer>();
 		container = new EntityContainerImpl<Integer, ComponentSequence<Component>>();
 
 		if(!container.isEmpty())
 			this.clear();
+		
+		jecsThread.interrupt();
+		
 	}
 	
 	/**
@@ -356,14 +362,53 @@ public class JECSHandle<Component extends Object>
 			return create();
 		}
 		
-		//create entity id and count in global order.
-		entities.add(newEntityIdentifier);
-		entityCount = entities.size() - 1;
+		//insert entity id and count in global order.
+		insert(newEntityIdentifier, size() - 1);
 		
 		//create components array represents component as data structure for entity.
 		ComponentSequence<Component> components = new ComponentSequenceImpl<Component>();
 		container.emplace(newEntityIdentifier, components);
 		return newEntityIdentifier;
+	}
+	
+	/**
+	 * See {@link #insert(int)}
+	 */
+	@Deprecated
+	@JECSApi
+	public final int[] create(int count)
+	{
+		return insert(count);
+	}
+	
+	/**
+	 * Assign <code>entity</code> identifier to container. 
+	 * 
+	 * @param entity - The entity.
+	 * @param setCount - Count order of entity to be created.
+	 */
+	public final void insert(int entity, int setCount)
+	{
+		entities.add(entity);
+		entityCount = setCount;
+	}
+	
+	/**
+	 * Assign one or more entities identifiers to container. For more detail, see 
+	 * {@link JECSHandle.create()}.
+	 * 
+	 * @param count - count of entities to be created.
+	 * 
+	 * @return A array of valid entities identifiers.
+	 */
+	@JECSApi
+	public final int[] insert(int count)
+	{
+		int entities[] = new int[count];
+		for(int i = 0; i < count; i++)
+			entities[i] = create();
+		
+		return entities;
 	}
 	
 	/**
@@ -403,6 +448,31 @@ public class JECSHandle<Component extends Object>
 		}
 			
 		return entity;
+	}
+	
+	/**
+	 * Destroy one or more entities identifiers. For more detail, see 
+	 * {@link JECSHandle.destroy()}.
+	 * 
+	 * @param <E> Type of entity.
+	 * @param entities - List of entities to be removed.
+	 * 
+	 * @return If all entity success destroyed, return total number of 
+	 * removed entities.
+	 */
+	@SafeVarargs
+	@JECSApi
+	public final <E extends Number> int destroy(E... entities)
+	{
+		int totalRemoved = 0;
+		for(E e : entities)
+		{
+			try {
+				destroy(e);
+				totalRemoved++;
+			} catch (JECSException e1) {e1.printStackTrace(); }
+		}
+		return totalRemoved;
 	}
 	
 	/**
@@ -499,7 +569,7 @@ public class JECSHandle<Component extends Object>
 	 */
 	@JECSApi
 	@BetaFeature
-	public final <E extends Number> E destroyFirst() throws JECSException { return destroy(null); }
+	public final <E extends Number> E destroyFirst() throws JECSException { return null; }
 	
 	/**
 	 * Destroy last entity identifier in the sequence of entities with all assigns 
@@ -509,10 +579,9 @@ public class JECSHandle<Component extends Object>
 	 * 
 	 * @throws JECSException if try to destory unexisting entity.
 	 */
-	@SuppressWarnings("unchecked")
 	@JECSApi
 	@BetaFeature
-	public final <E extends Number> E destroyLast() throws JECSException { return (E) destroy(null); }
+	public final <E extends Number> E destroyLast() throws JECSException { return null; }
 	
 	/**
 	 * Emplace <code>C</code> component with to that <code>entity</code>. Assigns the
@@ -725,6 +794,15 @@ public class JECSHandle<Component extends Object>
 			Object[] argss = (Object[]) argsArray[0][args];
 			emplace(entity, componentTs[args], argss);
 		}
+	}
+	
+	@JECSApi
+	public <E extends Number, C extends Component> void replace(E newEntity)
+	{
+		ComponentSequence<Component> old = null;
+		old = container.replace((Integer) newEntity, new ComponentSequenceImpl<Component>());
+		if(old != null)
+			old = null;
 	}
 	
 	/**
@@ -1031,5 +1109,11 @@ public class JECSHandle<Component extends Object>
 		boolean flag = (entity == null) || (entity == (E) unvalid || !container.containsKey(entity)); 
 		if(flag)
 			throw new JECSException("Cannot " + msg + " unvalid entity.");
+	}
+
+	@Override
+	public void run() 
+	{
+		
 	}
 }

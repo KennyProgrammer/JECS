@@ -1,6 +1,7 @@
 package kenny.jecs.collection;
 
 import java.util.ArrayList;
+import java.util.Collection;
 
 /**
  * This is actually implementation of {@link ComponentSequenceImpl}.
@@ -14,6 +15,21 @@ public class ComponentSequenceImpl<Component>
 {
 	private static final long serialVersionUID = 1L;
 
+	/**
+     * Constructs an empty sequence with an initial capacity of ten.
+     */
+	public ComponentSequenceImpl() { super(); }
+	
+	/**
+     * Constructs a sequence containing the elements of the specified
+     * collection, in the order they are returned by the collection's
+     * iterator.
+     *
+     * @param c the collection whose elements are to be placed into this sequence
+     * @throws NullPointerException if the specified collection is null
+     */
+	public ComponentSequenceImpl(Collection<? extends Component> c) { super(c); }
+	
 	@Override public boolean emplace(Component component) 
 	{
 		return add(component);

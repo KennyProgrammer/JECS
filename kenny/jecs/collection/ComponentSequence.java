@@ -13,7 +13,7 @@ public interface ComponentSequence<Component extends Object>
 {
 
 	/**
-	 * Emplace to {@link ComponentSequence} component data structure.
+	 * Emplace (place in future) to {@link ComponentSequence} component data structure.
 	 *
 	 * @param component - data structure that will be added.
 	 */

@@ -1,5 +1,6 @@
 package kenny.jecs;
 
+import static org.lwjgl.system.MemoryStack.*; //requied lwjgl 3
 import static kenny.jecs.JECSHandle.JECSReflect.*;
 import static java.lang.annotation.ElementType.*;
 import static java.lang.annotation.RetentionPolicy.*;
@@ -9,7 +10,11 @@ import java.lang.annotation.Target;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Parameter;
+import java.lang.reflect.Method;
 import java.lang.reflect.ParameterizedType;
+import java.nio.ByteBuffer;
+import java.nio.IntBuffer;
+import java.nio.charset.Charset;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Iterator;
@@ -268,15 +273,69 @@ public class JECSHandle<Component extends Object> implements Runnable
 	}
 	
 	/**
-	 * Sort the string and check if one of primitive type name existing in string. And return
-	 * already sorted string with out conflict.
+	 * String to ByteBuffer.
 	 */
 	@JECSApi
-	private static final String sort(String s)
+	private static ByteBuffer strToBb(String msg, Charset charset)
 	{
-		if(s == "byte[]" || s == "byte" || s == "char" || s == "short" || s == "int" || s == "long" || s == "float" || s == "double" || s == "boolean")
-			return s = "java.lang." + (s == "byte[]"?"String":s=="byte"?"Byte":s=="char"?"Character":s=="short"?"Short":s=="int"?"Integer":s=="long"?"Long":s=="float"?"Float":s=="double"?"Double":s=="boolean"?"Boolean":"");
-		return s;
+		return ByteBuffer.wrap(msg.getBytes(charset));
+	}
+	
+	/**
+	 * ByteBuffer to String.
+	 */
+	@JECSApi
+	private static String bbToStr(ByteBuffer buff, Charset charset)
+	{
+		byte[] bytes;
+		if (buff.hasArray()) {
+			bytes = buff.array();
+			} else {
+			bytes = new byte[buff.remaining()];
+			buff.get(bytes);
+		}
+		return new String(bytes);
+	}
+	
+	/**
+	 * Sort the string and maps primitive types of classes to objects of these types.
+	 */
+	@JECSApi
+	private static final Class<?> sort(String s, Class<?> t)
+	{
+		switch (s) 
+		{
+			case "byte[]"  : return String.class;
+			case "int"	   : return Integer.class;
+			case "float"   : return Float.class;
+			case "boolean" : return Boolean.class;
+			case "double"  : return Double.class;
+			case "byte"    : return Byte.class;
+			case "long"    : return Long.class;
+			case "short"   : return Short.class;
+			case "char"    : return Character.class;
+			default        : return t;
+		}
+	}
+	
+	/**
+	 * Sort the string and maps objects of primitive types to their normal non-object types.
+	 */
+	@JECSApi
+	private static final Class<?> sortR(String s, Class<?> t)
+	{
+		switch (s) 
+		{
+			case "java.lang.Integer"  : return int.class;
+			case "java.lang.Float"    : return float.class;
+			case "java.lang.Boolean"  : return boolean.class;
+			case "java.lang.Double"   : return double.class;
+			case "java.lang.Byte"     : return byte.class;
+			case "java.lang.Long"     : return long.class;
+			case "java.lang.Short"    : return short.class;
+			case "java.lang.Character": return char.class;
+			default                   : return t;
+		}
 	}
 
 	/**
@@ -322,22 +381,19 @@ public class JECSHandle<Component extends Object> implements Runnable
 	 * method.
 	 * <p>
 	 * See for constructing {@link #construct}.
+	 * @apiNote If LWJGL 3 Core not loadead, this contructor loads the .dll files.
 	 */
 	@JECSApi
 	@Deprecated(since = "use JECSHandle.construct() instead", forRemoval = false)
 	private JECSHandle() 
 	{
-		Thread jecsThread = new Thread(this, "JECSThread");
-		jecsThread.start();
-		
-		entities = new ArrayList<Integer>();
-		container = new EntityContainerImpl<Integer, ComponentSequence<Component>>();
-
-		if(!container.isEmpty())
-			this.clear();
-		
-		jecsThread.interrupt();
-		
+		try(org.lwjgl.system.MemoryStack s = stackPush()) {
+			entities = new ArrayList<Integer>();
+			container = new EntityContainerImpl<Integer, ComponentSequence<Component>>();
+	
+			if(!container.isEmpty())
+				this.clear();
+		}
 	}
 	
 	/**
@@ -357,25 +413,27 @@ public class JECSHandle<Component extends Object> implements Runnable
 	@JECSApi
 	public final int create()
 	{
-		int newEntityIdentifier = -1;
-		newEntityIdentifier = GENERATOR.nextInt(MAX_ENTITIES);
-		
-		if(newEntityIdentifier < 0)
-			return create();
-		
-		if(container.containsKey(newEntityIdentifier))
-		{
-			//if entity id already created its destroyed and recreates.
-			try {
-				destroy(newEntityIdentifier);
-			} catch (JECSException e) {
-				e.printStackTrace();
+		try(org.lwjgl.system.MemoryStack s = stackPush()) {
+			IntBuffer pEntity = s.mallocInt(1);
+			pEntity.put(GENERATOR.nextInt(MAX_ENTITIES)).flip(); 
+			
+			if(pEntity.get(0) < 0)
+				return create();
+			
+			if(container.containsKey(pEntity.get(0)))
+			{
+				//if entity id already created its destroyed and recreates.
+				try {
+					destroy(pEntity.get(0));
+				} catch (JECSException e) {
+					e.printStackTrace();
+				}
+				return create();
 			}
-			return create();
+			
+			//insert entity id and count in global order.
+			return insert(pEntity.get(0), size() - 1); 
 		}
-		
-		//insert entity id and count in global order.
-		return insert(newEntityIdentifier, size() - 1);
 	}
 	
 	/**
@@ -436,7 +494,6 @@ public class JECSHandle<Component extends Object> implements Runnable
 	 * 
 	 * @throws JECSException if try to destory unexisting entity.
 	 */
-	
 	@SuppressWarnings("unchecked")
 	@JECSApi 
 	public final <E extends Number> E destroy(E entity)  
@@ -480,15 +537,17 @@ public class JECSHandle<Component extends Object> implements Runnable
 	@JECSApi
 	public final <E extends Number> int destroy(E... entities)
 	{
-		int totalRemoved = 0;
-		for(E e : entities)
-		{
-			try {
-				destroy(e);
-				totalRemoved++;
-			} catch (JECSException e1) {e1.printStackTrace(); }
+		try(org.lwjgl.system.MemoryStack s = stackPush()) {
+			IntBuffer pTotalRemoved = s.callocInt(1);
+			for(E e : entities)
+			{
+				try {
+					destroy(e);
+					pTotalRemoved.put(0, pTotalRemoved.get(0) + 1);
+				} catch (JECSException e1) {e1.printStackTrace(); }
+			}
+			return pTotalRemoved.get(0);
 		}
-		return totalRemoved;
 	}
 	
 	/**
@@ -504,7 +563,7 @@ public class JECSHandle<Component extends Object> implements Runnable
 	@JECSApi
 	public final void destroyAll() throws JECSException
 	{
-		Integer entity = null;
+		int entity = 0;
 		ComponentSequence<Component> components = null;
 		
 		while(!empty())
@@ -620,97 +679,93 @@ public class JECSHandle<Component extends Object> implements Runnable
 					ClassNotFoundException, InstantiationException, IllegalAccessException, IllegalArgumentException, 
 							InvocationTargetException
 	{
-		boolean isSuccess = false;
-		int ctorsCount = getCtors(componentT).length;
-		if(ctorsCount == 0 && args.length != 0)
-			throw new JECSUndifiendBehaviourError(baseMsg + "Component <"+ componentT.getTypeName() +"> without default constructor cannot have args!");
-		
-		//for each component ctor check count args
-		for(int i = 0; i < ctorsCount; i++)
-		{
-			int ctorArgsCount = getCtorArgsCount(componentT, i);
-			int objArgsCount = args.length;
-			if(objArgsCount == ctorArgsCount)
+		try(org.lwjgl.system.MemoryStack stack = stackPush()) {
+			ByteBuffer success = stack.malloc(1);
+			ByteBuffer pCounts = stack.malloc(3); //pointer to array with (cCount, cArgsCount, oArgsCount)
+
+			pCounts.put(0, (byte) getCtors(componentT).length); 
+			if(pCounts.get(0) == 0 && args.length != 0)
+				throw new JECSUndifiendBehaviourError(baseMsg + "Component <"+ componentT.getTypeName() +"> without default constructor cannot have args!");
+			
+			//for each component ctor check count args
+			for(int i = 0; i < pCounts.get(0); i++)
 			{
-				//if default ctor
-				if(ctorArgsCount == 0)
+				pCounts.put(1, (byte) getCtorArgsCount(componentT, i));
+				pCounts.put(2, (byte) args.length);
+				if(pCounts.get(1) == pCounts.get(2))
 				{
-					isSuccess = true; break;
+					//if default ctor
+					if(pCounts.get(1) == 0)
+					{
+						success.put(0, (byte)1); break; //true
+					}
+					
+					//component ctor args class array
+					String[] classArgsType = new String[pCounts.get(1)];
+					String[] objectArgsType = new String[pCounts.get(2)];
+					
+					//Check args types
+					for(int j = 0; j < pCounts.get(1); j++)
+					{
+						//check enclosing clases
+						if(componentT.getEnclosingClass() != null)
+							throw new JECSUndifiendBehaviourError(baseMsg + "Component class must be host not enclosing! Is not support for now.");
+						
+						objectArgsType[j] = getClassS(args[j]); 
+						classArgsType[j] = getCtorArgS(componentT, i, j); 
+				
+						if(getCtorArgT(componentT, i, j).isInterface())
+						{
+							if(safeAsSubClass(JECSReflect.getClass(args[j]), getCtorArgT(componentT, i, j), baseMsg + "Cannot compare intefrace<"+getCtorArgT(componentT, i, j).getName()+
+									"> with class<"+objectArgsType[j]+">.") != null)
+								classArgsType[j] = objectArgsType[j]; 
+						}
+
+						classArgsType[j] = sort(classArgsType[j], JECSReflect.getClass(args[j])).getTypeName();
+						if(classArgsType[j].contentEquals(objectArgsType[j]))
+						{
+							if(j == pCounts.get(1)  - 1) 
+							{
+								success.put(0, (byte)1); //true
+								break;
+							}
+							continue;
+						}
+						else
+							throw new JECSUndifiendBehaviourError(baseMsg + "Try to place incorrect arg of component <"+ componentT.getName() + ">. " 
+								+ "Component arg"+ j + "["+classArgsType[j]+"] not equals input arg"+j+"["+objectArgsType[j] +"] type!");
+					}	
+					classArgsType = null;
+					objectArgsType = null;
 				}
 				
-				//component ctor args class array
-				String[] classArgsType = new String[(ctorArgsCount)];
-				String[] objectArgsType = new String[args.length];
-				
-				//Check args types
-				for(int j = 0; j < ctorArgsCount; j++)
-				{
-					//check enclosing clases
-					if(componentT.getEnclosingClass() != null)
-						throw new JECSUndifiendBehaviourError(baseMsg + "Component class must be host not enclosing! Is not support for now.");
-					
-					objectArgsType[j] = getClassS(args[j]); 
-					classArgsType[j] = getCtorArgS(componentT, i, j); 
-			
-					if(getCtorArgT(componentT, i, j).isInterface())
-					{
-						if(safeAsSubClass(JECSReflect.getClass(args[j]), getCtorArgT(componentT, i, j), baseMsg + "Cannot compare intefrace<"+getCtorArgT(componentT, i, j).getName()+
-								"> with class<"+objectArgsType[j]+">.") != null)
-						{
-							classArgsType[j] = objectArgsType[j]; 
-						}
-					}
-					classArgsType[j] = sort(classArgsType[j]);
-			
-					if(classArgsType[j].contentEquals(objectArgsType[j]))
-					{
-						if(j == ctorArgsCount - 1) 
-						{
-							isSuccess = true;
-							break;
-						}
-						continue;
-					}
-					else
-						throw new JECSUndifiendBehaviourError(baseMsg + "Try to place incorrect arg of component <"+ componentT.getName() + ">. " 
-							+ "Component arg"+ j + "["+classArgsType[j]+"] not equals input arg"+j+"["+objectArgsType[j] +"] type!");
-				}	
-				classArgsType = null;
-				objectArgsType = null;
+				//if args != component.args count and it last ctor then throw error.
+				if(args.length != pCounts.get(1) && i == pCounts.get(0) - 1 && success.get(0) != 1)
+					throw new JECSUndifiendBehaviourError(baseMsg + "To much args for component <"+ componentT.getSimpleName() +">. "
+							+ "Requied " + getCtorArgsCount(componentT, 0) + ".");
 			}
 			
-			//if args != component.args count and it last ctor then throw error.
-			if(args.length != ctorArgsCount && i == ctorsCount - 1 && !isSuccess)
-				throw new JECSUndifiendBehaviourError(baseMsg + "To much args for component <"+ componentT.getSimpleName() +">. "
-						+ "Requied " + getCtorArgsCount(componentT, 0) + ".");
-		}
-		
-		//if comp success checked on args then construct it and add to map.
-		if(isSuccess)
-		{
-			//get the constructor of creaing class by args
-			Class<?>[] objectCtorArgs = new Class<?>[args.length];
-			for(int l = 0; l < objectCtorArgs.length; l++)
+			//if comp success checked on args then construct it and add to map.
+			if(success.get(0) == 1)
 			{
-				objectCtorArgs[l] = args[l].getClass();
-				if(objectCtorArgs[l].getTypeName() == "java.lang.Boolean")
-					objectCtorArgs[l] = boolean.class;
-			}
-
-			Constructor<?> ctor = 
-					Class.forName(componentT.getName()).getConstructor(objectCtorArgs);
-		        
-			//create an pointer
-		    Object[] objectCtorValues = new Object[args.length];
-		    	for(int l = 0; l < objectCtorValues.length; l++)
-		    		objectCtorValues[l] = args[l];
-
-		    @SuppressWarnings("unchecked")
-		    //safty cast bc args == C ctor args
-		    C componentPointer = (C) ctor.newInstance(objectCtorValues);
-		    return componentPointer;
-	    }
-		return null;
+				//get the constructor of creaing class by args
+				Class<?>[] objectCtorArgs = new Class<?>[args.length];
+				for(int l = 0; l < objectCtorArgs.length; l++)
+				{
+					objectCtorArgs[l] = args[l].getClass();
+					if(objectCtorArgs[l].getTypeName() == "java.lang.Boolean")
+						objectCtorArgs[l] = boolean.class;
+				}
+	
+				Constructor<?> ctor = 
+						Class.forName(componentT.getName()).getConstructor(objectCtorArgs);
+			    @SuppressWarnings("unchecked")
+			    //safty cast bc args == C ctor args
+			    C componentPointer = (C) ctor.newInstance(args);
+			    return componentPointer;
+		    }
+			return null;
+		}
 	}
 	/**
 	 * Emplace <code>C</code> component with to that <code>entity</code>. Assigns the
@@ -1135,6 +1190,70 @@ public class JECSHandle<Component extends Object> implements Runnable
 	//utility for sorting.
 	
 	/**
+	 * This method invoke function/method from entity <code>C</code> component at runtime.
+	 * This method is usually not the best and fastest, but it is very effective and useful when 
+	 * the reference to the component is unknown and only the type is known.
+	 * <p>
+	 * I would try using the fastest ways to call the method, such as writing algorithms in JNI C++ and
+	 * loading in Java, maybe Yes, but in Java I don't know any faster ways.
+	 * 
+	 * @param <E> Entity type.
+	 * @param <C> Component type.
+	 * @param entity - The valid entity.
+	 * @param componentT - The component that the function will be called from.
+	 * @param funcName - Name of function/method which will be called.
+	 * @param funcArgs - Arguments to function/method.
+	 * 
+	 * @throws JECSException If entity not valid.
+	 */
+	public <E extends Number, C extends Component> void invoke(E entity, Class<C> componentT, String funcName, 
+			Object... funcArgs) throws JECSException
+	{
+		try 
+		{
+			Class<?>[] funcArgsTypes = new Class<?>[funcArgs.length]; 
+			for(int t = 0; t < funcArgs.length; t++) 
+				funcArgsTypes[t] = sortR(funcArgs[t].getClass().getTypeName(), funcArgs[t].getClass());
+			
+			Method func = componentT.getMethod(funcName, funcArgsTypes);
+			func.invoke(get(entity, componentT), funcArgs);
+			
+		} catch (NoSuchMethodException | SecurityException | IllegalAccessException |
+				IllegalArgumentException | InvocationTargetException e) 
+					{ e.printStackTrace();}
+	}
+	
+	/**
+	 * This method invoke function/method from entity for each <code>C</code> components at runtime. If 
+	 * at least one component doesen't have <code>funcName</code> with <code>funcArgs</code> this method 
+	 * throws one of system exceptions, namely {@link NoSuchMethodException} or {@link InvocationTargetException}.
+	 * <p>
+	 * This method is usually not the best and fastest, but it is very effective and useful when 
+	 * the reference to the component is unknown and only the type is known.
+	 * <p>
+	 * I would try using the fastest ways to call the method, such as writing algorithms in JNI C++ and
+	 * loading in Java, maybe Yes, but in Java I don't know any faster ways.
+	 * 
+	 * @param <E> Entity type.
+	 * @param <C> Component type.
+	 * @param entity - The valid entity.
+	 * @param componentTs - The components that for each of it the function will be called from.
+	 * @param funcName - Name of function/method which will be called.
+	 * @param funcArgs - Arguments to function/method.
+	 * 
+	 * @throws JECSException If entity not valid.
+	 */
+	@SuppressWarnings("unchecked")
+	public <E extends Number, C extends Component> void invokeEach(E entity, Class<?>[] componentTs, String funcName,
+			Object... funcArgs)
+	{
+		for(int c = 0; c < componentTs.length; c++)
+			try {
+				invoke(entity, (Class<C>)componentTs[c], funcName, funcArgs);
+			} catch (JECSException e) {e.printStackTrace();}
+	}
+	
+	/**
 	 * Checks if this entity has <code>C</code> component data by its type and return true 
 	 * otherwise false. 
 	 * <p>
@@ -1306,12 +1425,11 @@ public class JECSHandle<Component extends Object> implements Runnable
 		validationCheck(entity, "check on has component from");
 
 		ComponentSequence<Component> components = container.get(entity);
-		int componentCount = components.isEmpty() ? 0 : components.size();
-		for(int i = 0; i < componentCount; i++)
+		for(int i = 0; i < components.size(); i++)
 		{
 			if(components.get(i) == null)
 			{
-				if(i != componentCount) 
+				if(i != components.size()) 
 					continue;
 				else break;
 			} else {

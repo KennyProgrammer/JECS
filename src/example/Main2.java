@@ -1,13 +1,16 @@
+import java.nio.ByteBuffer;
+import java.nio.charset.Charset;
+import java.util.Random;
 
-import component.Component;
-import component.RendererComponent;
-import component.TagComponent;
-import component.TransformComponent;
-import component.Vector3f;
+import example.component.Component;
+import example.component.RendererComponent;
+import example.component.TagComponent;
+import example.component.TransformComponent;
+import example.component.Vector3f;
 import kenny.jecs.JECSException;
 import kenny.jecs.JECSHandle;
 
-public class Main0_1_2
+public class Main 
 {
 	
 	public static void main(String[] args) throws NoSuchMethodException, SecurityException, JECSException
@@ -22,6 +25,10 @@ public class Main0_1_2
 			int invalidEntity = 32342324;
 			int entity = system.create();
 			int entity2 = system.create();
+		
+			
+			//int v = system.destroy(entity, entity2);
+			
 			system.emplace(entity, TagComponent.class, "TagComponent");
 			system.emplace(entity, TransformComponent.class, new Vector3f(1, 2, 0), new Vector3f(0, 0, 0), new Vector3f(1, 1, 1));
 			system.emplace(entity, RendererComponent.class, true);
@@ -64,9 +71,15 @@ public class Main0_1_2
 			var componentEmplace = system.getOrEmplace(entity, TagComponent.class, "GetOrEmplace: Emplace Taggiy! (*_*)");
 			System.out.println(componentEmplace.tag);
 			
+			TagComponent taggiy = system.get(entity, TagComponent.class);
+			
+			system.invoke(entity, TagComponent.class, "printTag");
+			system.invoke(entity, TagComponent.class, "printTagAnd", "TagComponent", 5, true, new Random());
+			//taggiy.printTagAnd("TagComponent", 5, true, new Random());
 		}
 		system = JECSHandle.deconstruct(system);
-		
+
+	
 		/*
 		JECSHandleOld<Object> j = new JECSHandleOld<Object>();
 		

@@ -1,19 +1,19 @@
 package example;
 
-import component.Component;
-import component.RendererComponent;
-import component.TagComponent;
-import component.TransformComponent;
-import component.Vector3f;
+import example.component.Component;
+import example.component.RendererComponent;
+import example.component.TagComponent;
+import example.component.TransformComponent;
+import example.component.Vector3f;
 import kenny.jecs.JECSException;
 import kenny.jecs.JECSHandle;
 
-public class Main 
+public class Main4 
 {
 	
 	public static void main(String[] args) throws NoSuchMethodException, SecurityException, JECSException
 	{
-		new Main().init();
+		new Main4().init();
 	}
 	
 	public void init() throws JECSException

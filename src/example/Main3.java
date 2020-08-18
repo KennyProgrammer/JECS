@@ -1,7 +1,7 @@
 
-import component.ScriptA;
-import component.ScriptB;
-import component.ScriptComponent;
+import example.component.ScriptA;
+import example.component.ScriptB;
+import example.component.ScriptComponent;
 import kenny.jecs.JECSException;
 import kenny.jecs.JECSHandle;
 

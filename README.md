@@ -33,3 +33,6 @@ jecs.erase(entity, TagComponent.class, TransformComponent.class);
 
 jecs = JECSHandle.deconstruct(jecs);
 ```
+
+## Requiements:
+To use JECS you also need [https://www.lwjgl.org/customize](LWJGL 3 Core).

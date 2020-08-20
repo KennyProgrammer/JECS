@@ -1,6 +1,6 @@
 package kenny.jecs;
 
-public class JECSException extends Exception
+public class JECSException extends RuntimeException
 {
 	private static final long serialVersionUID = 1L;
 	

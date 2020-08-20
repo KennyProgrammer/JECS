@@ -1,7 +1,7 @@
 package kenny.jecs;
 
-import static org.lwjgl.system.MemoryStack.*; //requied lwjgl 3
-import static kenny.jecs.JECSHandle.JECSReflect.*;
+import static org.lwjgl.system.MemoryStack.*; //requied lwjgl 3 (.dll & .jar) to build path
+import static kenny.jecs.JECS.JECSReflect.*;
 import static java.lang.annotation.ElementType.*;
 import static java.lang.annotation.RetentionPolicy.*;
 import java.lang.annotation.Documented;
@@ -19,6 +19,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Iterator;
 import java.util.List;
+import java.util.ListIterator;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Random;
@@ -29,6 +30,16 @@ import kenny.jecs.collection.ComponentSequence;
 import kenny.jecs.collection.ComponentSequenceImpl;
 import kenny.jecs.collection.EntityContainer;
 import kenny.jecs.collection.EntityContainerImpl;
+import kenny.jecs.collection.ReversedIterator;
+import kenny.jecs.collection.ReversedIteratorList;
+import kenny.jecs.funcs.Create;
+import kenny.jecs.funcs.CreateI;
+import kenny.jecs.funcs.Destroy;
+import kenny.jecs.funcs.DestroyI;
+import kenny.jecs.funcs.Each;
+import kenny.jecs.funcs.EachC;
+import kenny.jecs.funcs.EachCI;
+import kenny.jecs.funcs.EachI;
 
 /**
  * <code>JECS</code> or <b>Java Entity-Component-System API</b> this is a small system that holds all entity identifiers in a single object 
@@ -48,11 +59,10 @@ import kenny.jecs.collection.EntityContainerImpl;
  * <p>
  * Example: 
  * <blockquote><pre>
- * JECSHandle<<Object>Object> jecs = JECSHandle.construct();
+ * JECS<<Object>Object> jecs = JECS.construct();
  * 
  * int entity = jecs.create(); 
  * jecs.emplace(entity, new TransformComponent()); 
- * jecs.emplace(...); 
  * 	
  * while(jecs.has(TransformComponent.class)) 
  * {
@@ -64,9 +74,8 @@ import kenny.jecs.collection.EntityContainerImpl;
  * 		jecs.erase(entity, TransformComponent.class);
  * }
  *
- * jecs.erase(...);
  * jecs.destroy(entity); 
- * jecs = JECSHandle.deconstruct(jecs);
+ * jecs = JECS.deconstruct(jecs);
  * </pre></blockquote>
  * 
  * @param <Component> This is starting hierarchy of component, by default set by Object.
@@ -74,14 +83,17 @@ import kenny.jecs.collection.EntityContainerImpl;
  * be recognize for system has a component. 
  * 
  * @author Danil (Kenny) Dukhovenko 
- * @version 0.1.4
+ * @version 0.1.5
+ * 
+ * TODO: Add multithreading support + bug fixes.
  */
-@JECSHandle.JECSApi
-public class JECSHandle<Component extends Object> implements Runnable
+@JECS.JECSApi(since =  "0.1.5")
+public class JECS<Component extends Object> implements Runnable
 {	 
 	/**
 	 * Recognizes the Java Entity Component system API. Indicates that each method or variable 
 	 * belongs to the class of this API.
+	 * 
 	 */
 	@Target({ANNOTATION_TYPE, CONSTRUCTOR, FIELD, METHOD, TYPE})
 	private static @interface JECSApi { String since() default ""; String funcDesc() default "";}
@@ -248,7 +260,7 @@ public class JECSHandle<Component extends Object> implements Runnable
 	/**Global statistic thing to calculate how many entities were created.*/
 	static int entityCount = -1;
 	/**If true, then {@link JECSException} will throws with validation error msg if need.*/
-	static boolean validationEnabled = true;
+	static boolean randomEntityGenerator = true;
 	/**Max count of entities available by this handle.*/
 	protected static final int MAX_ENTITIES = Integer.MAX_VALUE - 1;
 	/**Max count of components available by this handle.*/
@@ -256,11 +268,15 @@ public class JECSHandle<Component extends Object> implements Runnable
 	/**Default value of pack capacity.*/
 	protected static final int DEFAULT_PACK_CAPACITY = 1;
 	/**This is random entity generator.*/
-	private static final Random GENERATOR = new Random();
+	private static Random RAN_GENERATOR;
+	/**This is non-random entity generator.*/
+	private static int NON_RAN_GENERATOR;
 	/**{@link JECSUndifiendBehaviourError} message base.*/
 	private static final String baseMsg = "Cannot construct component from args.\n";
 	/**Array of entities for searching to find component of that entity.*/
 	private volatile ArrayList<Integer> entities;
+	/**Array of entities for searching to find component of that entity.*/
+	//private volatile SortedMap<Integer, Integer> entts;
 	/**Container of entity identifiers and sequence of all components identifiers and his data.*/
 	private volatile EntityContainer<Integer, ComponentSequence<Component>> container;
 	/**Packs of components to store and for better iteration time.*/
@@ -371,9 +387,9 @@ public class JECSHandle<Component extends Object> implements Runnable
 	 * @return New instance of constructed system.
 	 */
 	@JECSApi(since = "0.1.1", funcDesc = "constructor")
-	public static <CompObj extends Object> JECSHandle<CompObj> construct()
+	public static <CompObj extends Object> JECS<CompObj> construct()
 	{
-		return new JECSHandle<CompObj>();
+		return new JECS<CompObj>();
 	}
 
 	/**
@@ -383,7 +399,7 @@ public class JECSHandle<Component extends Object> implements Runnable
 	 * @return <code>Null</code> instance of constructed system.
 	 */
 	@JECSApi(since = "0.1.1", funcDesc = "destructor")
-	public static <CompObj extends Object> JECSHandle<CompObj> deconstruct(JECSHandle<CompObj> handle)
+	public static <CompObj extends Object> JECS<CompObj> deconstruct(JECS<CompObj> handle)
 	{
 		if(handle != null)
 		{
@@ -407,18 +423,85 @@ public class JECSHandle<Component extends Object> implements Runnable
 	 */
 	@JECSApi(funcDesc = "constructor")
 	@Deprecated(since = "use JECSHandle.construct() instead", forRemoval = false)
-	private JECSHandle() 
+	private JECS() 
 	{
+		Thread thread = new Thread(this, "JECS System Thread");
+		thread.start();
+		
 		try(org.lwjgl.system.MemoryStack s = stackPush()) {
-			entities = new ArrayList<Integer>();
+			entities = new ArrayList<Integer>();			
+			//entts = new TreeMap<Integer, Integer>();
 			container = new EntityContainerImpl<Integer, ComponentSequence<Component>>();
 			packs = new TreeMap<Integer, ComponentSequence<Component>>();
 			for(int i = 0; i < DEFAULT_PACK_CAPACITY; i++)
 				packs.put(i, new ComponentSequenceImpl<Component>());
 			
+			if(randomEntityGenerator)
+				RAN_GENERATOR = new Random();
+			else
+				NON_RAN_GENERATOR = -1;
 			
 			if(!container.isEmpty())
 				this.clear();
+		}
+		
+		System.out.println(Thread.currentThread());
+	}
+	
+	/**
+	 * Generate a simple valid entity indentifier. If {@link #randomEntityGenerator} if enabled
+	 * then will runs random generator of valid entities, otherwise basic increment generator.
+	 * 
+	 * @return Returns new generated valid entity.
+	 */
+	@JECSApi(since = "0.1.5")
+	private final int generateEntity()
+	{
+		try(org.lwjgl.system.MemoryStack s = stackPush()) {
+			IntBuffer pEntity = s.mallocInt(1);
+			if(randomEntityGenerator)
+				pEntity.put(0, generateRandomEntity());
+			else if(NON_RAN_GENERATOR < MAX_ENTITIES)
+				pEntity.put(0, NON_RAN_GENERATOR++);
+			return pEntity.get(0);
+		}
+	}
+	
+	/**
+	 * Generate a random valid entity indentifier.
+	 * 
+	 * @return Returns new generated valid entity.
+	 */
+	@JECSApi(since = "0.1.5")
+	private final int generateRandomEntity()
+	{
+		return RAN_GENERATOR.nextInt(MAX_ENTITIES);
+	}
+	
+	/**
+	 * {@link #create()}.
+	 */
+	@JECSApi(since = "0.1.0")
+	private final int create0()
+	{
+		try(org.lwjgl.system.MemoryStack s = stackPush()) {
+			IntBuffer pEntity = s.mallocInt(1);
+			pEntity.put(generateEntity()).flip(); 
+			
+			if(pEntity.get(0) < 0)
+				return create();
+			
+			if(container.containsKey(pEntity.get(0)))
+			{
+				//if entity id already created its destroyed and recreates.
+				try {
+					destroy(pEntity.get(0));
+				} catch (JECSException e) {
+					e.printStackTrace();
+				}
+				return create();
+			}
+			return pEntity.get(0);
 		}
 	}
 	
@@ -438,27 +521,44 @@ public class JECSHandle<Component extends Object> implements Runnable
 	 */
 	@JECSApi(since = "0.1.0")
 	public final int create()
-	{
+	{	
 		try(org.lwjgl.system.MemoryStack s = stackPush()) {
 			IntBuffer pEntity = s.mallocInt(1);
-			pEntity.put(GENERATOR.nextInt(MAX_ENTITIES)).flip(); 
-			
-			if(pEntity.get(0) < 0)
-				return create();
-			
-			if(container.containsKey(pEntity.get(0)))
-			{
-				//if entity id already created its destroyed and recreates.
-				try {
-					destroy(pEntity.get(0));
-				} catch (JECSException e) {
-					e.printStackTrace();
-				}
-				return create();
-			}
-			
+			pEntity.put(0, create0()); 
 			//insert entity id and count in global order.
-			return insert(pEntity.get(0), size() - 1); 
+			return insert(pEntity.get(0), entityCount++); 	
+		}
+	}
+	
+	/**
+	 * Creates new entity identifier. In more detail, it generates a random number in 
+	 * the range MAX_ENTITIES, which will be recognized by the handler as an valid entity.
+	 * <p>
+	 * If an entity with this identifier already exists in the handler, it will delete it and
+	 * recreate as empty entity.
+	 * <p>
+	 * This create accept in parameter {@link CreateI} to send information about entity creation.
+	 * <p>
+	 * Example:
+	 * <blockquote><pre>
+	 * var entity = system.create((entity)->{System.out.println("Entity " + entity + " created!")});
+	 * </blockquote></pre>
+	 * 
+	 * @param func {@link CreateI} func implementation.
+	 * 
+	 * @return A valid entity identifier.
+	 */
+	@JECSApi(since = "0.1.5")
+	public final int create(CreateI func)
+	{	
+		try(org.lwjgl.system.MemoryStack s = stackPush()) {
+			IntBuffer pEntity = s.mallocInt(1);
+			pEntity.put(0, create0());
+			Create funcImpl = Create.create(func);
+			funcImpl.invoke(pEntity.get(0));
+				
+			//insert entity id and count in global order.
+			return insert(pEntity.get(0), entityCount++); 
 		}
 	}
 	
@@ -480,13 +580,13 @@ public class JECSHandle<Component extends Object> implements Runnable
 	 * system.insert(entity, system.size() - 1);
 	 * </blockquote></pre>
 	 * @param entity - The entity to be inserted.
-	 * @param setCount - Count order of entity to be created.
+	 * @param count - Count order of entity to be created.
 	 */
 	@JECSApi(since = "0.1.2")
-	public final int insert(int entity, int setCount)
+	public final int insert(int entity, int count)
 	{
 		entities.add(entity);
-		entityCount = setCount;
+		//entts.put(count, entity);
 		
 		//create components array represents component as data structure for entity.
 		ComponentSequence<Component> components = new ComponentSequenceImpl<Component>();
@@ -538,6 +638,7 @@ public class JECSHandle<Component extends Object> implements Runnable
 		
 		container.erase((Integer) entity, components);
 		entities.remove((Integer) entity);
+		//entts.remove(--entityCount, entity);
 		entityCount = entities.size() - 1;
 		
 		//is entity doesn't exist, that its succesfful removed and retuned -1. 
@@ -548,6 +649,33 @@ public class JECSHandle<Component extends Object> implements Runnable
 		}
 			
 		return entity;
+	}
+	
+	/**
+	 * Destroy <code>entity</code> associated with all components of removed entity.
+	 * 
+	 * This destroy accept in parameter {@link DestroyI} to send information about entity destruction.
+	 * <p>
+	 * Example:
+	 * <blockquote><pre>
+	 * system.destroy(entity, (entity)->{System.out.println("Entity " + entity + " has been destroyed!")});
+	 * </blockquote></pre>
+	 * 
+	 * @param func {@link DestroyI} func implementation.
+	 * @param <E> Entity type.
+	 * @param entity - identifier of entity to be destroy.
+	 * @return If entity success destroyed, return -1, otherwise other positive number. 
+	 * 
+	 * @throws JECSException if try to destory unexisting entity.
+	 */
+	@JECSApi(since = "0.1.5")
+	public final <E extends Number> E destroy(E entity, DestroyI func)  
+			throws JECSException
+	{
+		Destroy funcImpl = Destroy.create(func);
+		funcImpl.invoke(entity.intValue());
+		
+		return destroy(entity);
 	}
 	
 	/**
@@ -1211,13 +1339,9 @@ public class JECSHandle<Component extends Object> implements Runnable
 				Class<? extends C> componentT = (Class<? extends C>) componentTs[i]; 
 				container.get(entity).erase(get(entity, componentT));
 			}
-		}	
+		}
 	}
-	
-	//has for multiplie components
-	//add other methods
-	//utility for sorting.
-	
+
 	/**
 	 * This method invoke function/method from entity <code>C</code> component at runtime.
 	 * This method is usually not the best and fastest, but it is very effective and useful when 
@@ -1236,9 +1360,9 @@ public class JECSHandle<Component extends Object> implements Runnable
 	 * @throws JECSException If entity not valid.
 	 */
 	@JECSApi(since = "0.1.3", funcDesc = "invoke")
-	public <E extends Number, C extends Component> void invoke(E entity, Class<C> componentT, String funcName, 
+	public synchronized <E extends Number, C extends Component> void invoke(E entity, Class<C> componentT, String funcName,
 			Object... funcArgs) throws JECSException
-	{
+	{		
 		try 
 		{
 			Class<?>[] funcArgsTypes = new Class<?>[funcArgs.length]; 
@@ -1275,7 +1399,7 @@ public class JECSHandle<Component extends Object> implements Runnable
 	 */
 	@SuppressWarnings("unchecked")
 	@JECSApi(since = "0.1.3", funcDesc = "invoke for each type")
-	public <E extends Number, C extends Component> void invokeEach(E entity, Class<?>[] componentTs, String funcName,
+	public synchronized <E extends Number, C extends Component> void invokeEach(E entity, Class<?>[] componentTs, String funcName,
 			Object... funcArgs)
 	{
 		for(int c = 0; c < componentTs.length; c++)
@@ -1308,7 +1432,7 @@ public class JECSHandle<Component extends Object> implements Runnable
 	 */
 	@SuppressWarnings("unchecked")
 	@JECSApi(since = "0.1.4", funcDesc = "invoke for each if subclass")
-	public <E extends Number, C extends Component> void invokeEach(E entity, Class<C> componentT, String funcName,
+	public synchronized <E extends Number, C extends Component> void invokeEach(E entity, Class<C> componentT, String funcName,
 			Object... funcArgs) throws JECSException
 	{
 		try(org.lwjgl.system.MemoryStack stack = stackPush()) {
@@ -1334,6 +1458,177 @@ public class JECSHandle<Component extends Object> implements Runnable
 				
 			} catch (  SecurityException | IllegalArgumentException  e) 
 						{ e.printStackTrace();}
+		}
+	}
+	
+	/**
+	 * Compare class a with other class b. If it equals return true, otherwise false.
+	 * 
+	 * @param a - Class to compare with.
+	 * @param b - Class that is being compared.
+	 */
+	@JECSApi(since = "0.1.5", funcDesc = "class with class")
+	public boolean eqs(Class<?> a, Class<?> b)
+	{
+		return a == b ? true : false;
+	}
+	
+	/**
+	 * Compare object-class a with other class b. If it equals return true, otherwise 
+	 * false.
+	 * 
+	 * @param a - Class-object to compare with.
+	 * @param b - Class that is being compared.
+	 */
+	@JECSApi(since = "0.1.5", funcDesc = "object with class")
+	public boolean eqs(Object a, Class<?> b)
+	{
+		return a.getClass() == b ? true : false;
+	}
+	
+	/**
+	 * Compare class a with other object-class b. If it equals return true, otherwise 
+	 * false.
+	 * 
+	 * @param a - Class to compare with.
+	 * @param b - Class-object that is being compared.
+	 */
+	@JECSApi(since = "0.1.5", funcDesc = "class with object")
+	public boolean eqs(Class<?> a, Object b)
+	{
+		return a == b.getClass() ? true : false;
+	}
+	
+	/**
+	 * Compare object-class a with other object-class b. If it equals return true, otherwise 
+	 * false.
+	 * 
+	 * @param a - Class-object to compare with.
+	 * @param b - Class-object that is being compared.
+	 */
+	@JECSApi(since = "0.1.5", funcDesc = "object with object")
+	public boolean eqs(Object a, Object b)
+	{
+		return a.getClass() == b.getClass() ? true : false;
+	}
+	
+	/*
+	 * 
+	 */
+	@SuppressWarnings("unchecked")
+	@BetaFeature
+	@JECSApi(since = "0.1.5", funcDesc = "save cast")
+	public <C extends Component> C cast(Class<?> in, Object from)
+	{
+		if(eqs(in, from))
+			return ((C) from);
+		return null;	
+	}
+
+	/**
+	 * This method iterate over each entity including all components of <code>componentT</code> and all sub-components
+	 * extended, implemented, inherted from it at runtime. Each uses {@link EachI} functional interface as additional
+	 * parameter. Its allows to add additional properties inside <code>each</code> function for specific entity and
+	 * components. More detail about <code>EachI</code> see in {@link EachI#invoke(int, Object)}.
+	 * <p>
+	 * This method is usually the best and fastest choise, and very effective than {@link #invokeEach(Number, Class, String, Object...)}
+	 * and {@link #invokeEachPack(Object[], String, Object...)}.
+	 * <p>
+	 * If some entity component(s) in sequence of components will not be sub-component of <code>componentT</code>, it just skip it and return 
+	 * <code>null</code> instance. This will not affect the iteration process, but it will not be called for this component
+	 * {@link EachI#invoke(int, Object)} implementation function.
+	 * <p>
+	 * Example:
+	 * <blockquote><pre>
+	 * system.each(ComponentBase.class, (entity, component) ->
+	 * {
+	 *       component.printName();
+	 * });
+	 * </blockquote></pre>
+	 * 
+	 * @param <E> Entity type.
+	 * @param <C> Component type.
+	 * @param componentT - Component as super-component.
+	 * @param funcImpl - {@link EachI} function interface, or lambda expression.
+	 */
+	@JECSApi(since = "0.1.5", funcDesc = "each for all entities with c & sub-c")
+	public synchronized <E extends Number, C extends Component> void each(Class<C> componentT, EachI<C> funcImpl) 
+			throws JECSException
+	{
+		Each<C> eachFuncImpl = Each.create(funcImpl);
+		Iterator<Integer> itr = entities.iterator();
+		
+		while(itr.hasNext())
+		{
+			int entity = itr.next();
+			for(int componentIndex = 0; componentIndex < size(entity); componentIndex++)
+			{
+				C component = safeAsSubClass(container.get(entity).get(componentIndex).getClass(), componentT, "", false) != null 
+					? get(entity, container.get(entity).get(componentIndex).getClass()) 
+					: null;
+				
+				if(component != null)
+					eachFuncImpl.invoke(entity, component);
+			}
+		}
+	}
+	
+	/**
+	 * This method iterate over each entity including all components which are contains at each entity in runtime. Each uses 
+	 * {@link EachCI} functional interface as additional parameter. Its allows to add additional properties inside <code>each</code> 
+	 * function for specific entity and components. <b>Remember</b> that if you want to call methods, functions, or parameters of a special
+	 * component, you must first check that this type of component exists at all and then cast to specific type to invoke content. 
+	 * <p>
+	 * Basic example:
+	 * <blockquote><pre>
+	 *  ... //body of functional interface
+	 * 
+	 *  if(system.eqs(ComponentAny.class, component))
+	 *        ((ComponentAny) component).printName();
+	 *
+	 *  ...
+	 * 
+	 * </blockquote></pre>
+	 * More detail about <code>EachI</code> see in {@link EachCI#invoke(int, Object)}.
+	 * <p>
+	 * This method is usually the best and fastest choise, and very effective than {@link #invokeEach(Number, Class, String, Object...)}
+	 * and {@link #invokeEachPack(Object[], String, Object...)}.
+	 * <p>
+	 * If some entity component(s) in sequence of components will not be sub-component of <code>componentT</code>, it just skip it and return 
+	 * <code>null</code> instance. This will not affect the iteration process, but it will not be called for this component
+	 * {@link EachI#invoke(int, Object)} implementation function, but slighty slow than {@link #each(Class, EachI)} for fully justified reasons.
+	 * <p>
+	 * Example:
+	 * <blockquote><pre>
+	 * system.each((entity, anyComponent) ->
+     * {
+     *      if(system.eqs(ComponentAny.class, anyComponent))
+     *           ((ComponentAny) anyComponent).printObj(toString());
+     * });
+     *
+	 * </blockquote></pre>
+	 * @param <E> Entity type.
+	 * @param <C> Component type.
+	 * @param componentT - Component as super-component.
+	 * @param funcImpl - {@link EachI} function interface, or lambda expression.
+	 */
+	@BetaFeature
+	@JECSApi(since = "0.1.5", funcDesc = "each for all entities with any c")
+	public synchronized <E extends Number, C extends Component> void each(EachCI<C> funcImpl) 
+			throws JECSException
+	{
+		EachC<C> eachFuncImpl = EachC.create(funcImpl);
+		Iterator<Integer> itr = entities.iterator();	
+		
+		while(itr.hasNext())
+		{
+			int entity = itr.next();
+			for(int componentIndex = 0; componentIndex < size(entity); componentIndex++) {
+				@SuppressWarnings("unchecked") //undifiend behaviour if Object not C.
+				C component = (C)getObject(entity, componentIndex);
+				if(component != null)
+					eachFuncImpl.invoke(entity, component);
+			}
 		}
 	}
 	
@@ -1461,7 +1756,7 @@ public class JECSHandle<Component extends Object> implements Runnable
 	 * @param <E> Entity type.
 	 * @return True if entity exist in container otherwise false.
 	 */
-	@JECSApi
+	@JECSApi(since = "0.1.2")
 	public final <E extends Number> boolean contains(E entity)
 	{
 		if(container.containsKey(entity)) 
@@ -1504,7 +1799,7 @@ public class JECSHandle<Component extends Object> implements Runnable
 	 */
 	@SuppressWarnings("unchecked")
 	@JECSApi(since = "0.1.2")
-	public <E extends Number, C extends Component> C get(E entity, Class<C> componentT) 
+	public <E extends Number, C extends Component> C get(E entity, Class<?> componentT) 
 			throws JECSException 
 	{
 		validationCheck(entity, "check on has component from");
@@ -1524,6 +1819,62 @@ public class JECSHandle<Component extends Object> implements Runnable
 			}
 		}
 		throw new JECSException("Component with type <" + componentT.getName() + "> non-exist!");
+	}
+	
+	/**
+	 * Return next avaliable component object of entity from index.
+	 * 
+	 * @param entity - A valid entity.
+	 * @param index - Index of returned component from entity.
+	 */
+	@BetaFeature
+	@JECSApi(since = "0.1.5")
+	private <E extends Number> Object getObject(E entity, int index) 
+	{
+		validationCheck(entity, "check on has component from");
+
+		ComponentSequence<Component> components = container.get(entity);
+		if(components.get(index) == null)
+			return null;
+		else
+			return components.get(index);
+	}
+	
+	/**
+	 * Get's the component <code>C</code> from class type of that component.
+	 *
+	 * @param <E> Type of entity. 
+	 * @param <C> Type of component.
+	 * @param componentT - Its of type of class like <code>String.class</code>.
+	 * @return Already casted to (C) object from clas type, so you don't need to cast 
+	 * it to (C).
+	 * 
+	 * @throws JECSException If class type null or not exist in component map. Or if
+	 * handle is not created.
+	 */
+	@SuppressWarnings("unchecked")
+	@BetaFeature
+	@JECSApi(since = "0.1.5")
+	public <E extends Number, C extends Component> C getIfExist(E entity, Class<C> componentT) 
+			throws JECSException 
+	{
+		validationCheck(entity, "check on has component from");
+
+		ComponentSequence<Component> components = container.get(entity);
+		for(int i = 0; i < components.size(); i++)
+		{
+			if(components.get(i) == null)
+			{
+				if(i != components.size()) 
+					continue;
+				else break;
+			} else {
+				if(components.get(i).getClass().getName().equals(componentT.getName()))
+					//this is absolutly safty cast bc we cast Object to T (i.e Object is parent for T)
+					return ((C) container.get(entity).get(i));
+			}
+		}
+		return null;
 	}
 	
 	/**
@@ -1714,7 +2065,7 @@ public class JECSHandle<Component extends Object> implements Runnable
 	 */
 	@JECSApi(since = "0.1.4")
 	@SafeVarargs
-	public final <Pack extends Component> void invokeEachPack(Pack[] pack, String funcName, Object... funcArgs)
+	public final synchronized <Pack extends Component> void invokeEachPack(Pack[] pack, String funcName, Object... funcArgs)
 	{	
 		for(int i = 0; i < pack.length; i++)
 		{
@@ -1731,6 +2082,48 @@ public class JECSHandle<Component extends Object> implements Runnable
 					IllegalArgumentException | InvocationTargetException e) 
 						{ e.printStackTrace();}
 		}
+	}
+	
+	/**
+	 * Returns an iterator over the entities identifiers elements in this list 
+	 * in proper sequence. 
+	 */
+	@JECSApi(since = "0.1.5")
+	public final Iterator<Integer> iterator()
+	{
+		return entities.iterator();
+	}
+	
+	/**
+	 * Returns an list iterator over the entities identifiers elements in this list 
+	 * in proper sequence. 
+	 */
+	@JECSApi(since = "0.1.5")
+	public final ListIterator<Integer> listIterator()
+	{
+		return entities.listIterator();
+	}
+	
+	/**
+	 * Returns an reversed iterator over the entities identifiers elements in this list 
+	 * in proper sequence. 
+	 */
+	@JECSApi(since = "0.1.5")
+	public final ReversedIterator<Integer> reversedIterator()
+	{
+		ReversedIterator<Integer> reverseItr = new ReversedIterator<Integer>(entities);
+		return reverseItr;
+	}
+	
+	/**
+	 * Returns an reversed iterator list over the entities identifiers elements in this list 
+	 * in proper sequence. 
+	 */
+	@JECSApi(since = "0.1.5")
+	public final ReversedIteratorList<Integer> reversedIteratorList()
+	{
+		ReversedIteratorList<Integer> reverseListItr = new ReversedIteratorList<Integer>(entities);
+		return reverseListItr;
 	}
 	
 	/**
@@ -1806,14 +2199,11 @@ public class JECSHandle<Component extends Object> implements Runnable
 	private <E extends Number> void validationCheck(E entity, String msg) 
 			throws JECSException
 	{
-		if(validationEnabled)
-		{
-			final Integer unvalid = -1; //uses Integer instead 'int' because generic type cast.
-			@SuppressWarnings("unchecked")
-			boolean flag = (entity == null) || (entity == (E) unvalid); 
-			if(flag)
-				throw new JECSException("Cannot " + msg + " unvalid entity.");
-		}
+		final Integer unvalid = -1; //uses Integer instead 'int' because generic type cast.
+		@SuppressWarnings("unchecked")
+		boolean flag = (entity == null) || (entity == (E) unvalid); 
+		if(flag)
+			throw new JECSException("Cannot " + msg + " unvalid entity.");
 	}
 	
 	/**
@@ -1829,7 +2219,63 @@ public class JECSHandle<Component extends Object> implements Runnable
 		return "JECSHandle [entities=" + entities + ", container=" + container + ", packs=" + packs + "]";
 	}
 	
+	
+	/**
+	 * Returns a hash code value for the {@link JECS}. This method is supported for the benefit of hash 
+	 * tables such as those provided by java.util.HashMap. 
+	 */
+	@Override
+	@JECSApi(since = "0.1.5")
+	public int hashCode() {
+		final int prime = 31;
+		int result = 1;
+		result = prime * result + ((container == null) ? 0 : container.hashCode());
+		result = prime * result + ((entities == null) ? 0 : entities.hashCode());
+		result = prime * result + ((packs == null) ? 0 : packs.hashCode());
+		return result;
+	}
+
+	/**
+	 * See {@link Object#equals(Object)}.
+	 */
+	@Override
+	@JECSApi(since = "0.1.5")
+	public boolean equals(Object obj) {
+		if (this == obj)
+			return true;
+		if (obj == null)
+			return false;
+		if (getClass() != obj.getClass())
+			return false;
+		@SuppressWarnings("unchecked")
+		JECS<Component> other = (JECS<Component>) obj;
+		if (container == null) {
+			if (other.container != null)
+				return false;
+		} else if (!container.equals(other.container))
+			return false;
+		if (entities == null) {
+			if (other.entities != null)
+				return false;
+		} else if (!entities.equals(other.entities))
+			return false;
+		//if (entts == null) {
+			//if (other.entts != null)
+				//return false;
+	//	} else if (!entts.equals(other.entts))
+			// false;
+		if (packs == null) {
+			if (other.packs != null)
+				return false;
+		} else if (!packs.equals(other.packs))
+			return false;
+		return true;
+	}
+
 	@JECSApi(since = "0.1.*")
 	@Override
-	public void run() {}
+	public void run() 
+	{
+		System.out.print("Hey");
+	}
 }

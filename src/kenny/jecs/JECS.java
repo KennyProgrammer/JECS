@@ -1,7 +1,7 @@
 package kenny.jecs;
 
 import static org.lwjgl.system.MemoryStack.*; //requied lwjgl 3 (.dll & .jar) to build path
-import static kenny.jecs.JECS.JECSReflect.*;
+import static kenny.jecs.JECS.Reflect.*;
 import static java.lang.annotation.ElementType.*;
 import static java.lang.annotation.RetentionPolicy.*;
 import java.lang.annotation.Documented;
@@ -83,11 +83,11 @@ import kenny.jecs.funcs.EachI;
  * be recognize for system has a component. 
  * 
  * @author Danil (Kenny) Dukhovenko 
- * @version 0.1.5
+ * @version 0.1.6
  * 
  * TODO: Add multithreading support + bug fixes.
  */
-@JECS.JECSApi(since =  "0.1.5")
+@JECS.JECSApi(since =  "0.1.6")
 public class JECS<Component extends Object> implements Runnable
 {	 
 	/**
@@ -96,8 +96,8 @@ public class JECS<Component extends Object> implements Runnable
 	 * 
 	 */
 	@Target({ANNOTATION_TYPE, CONSTRUCTOR, FIELD, METHOD, TYPE})
-	private static @interface JECSApi { String since() default ""; String funcDesc() default "";}
-	
+	static @interface JECSApi { String since() default ""; String funcDesc() default "";}
+
 	/**
 	 * Signifies that a public API (public class, method or field) is subject to incompatible changes,
 	 * or even removal, in a future release. An API bearing this annotation is exempt from any
@@ -111,16 +111,16 @@ public class JECS<Component extends Object> implements Runnable
 	@Retention(CLASS)
 	@Target({ANNOTATION_TYPE, CONSTRUCTOR, FIELD, METHOD, TYPE})
 	@Documented
-	private static @interface BetaFeature {}
+	static @interface BetaFeature {}
 	
 	/**
-	 * This is {@link JECSReflect} class to help with Java Reflection Framework. Its contains
+	 * This is {@link Reflect} class to help with Java Reflection Framework. Its contains
 	 * kinda of utility class for sorting, constructing and short writing Reflection methods.
 	 * 
 	 * @author Danil (Kenny) Dukhovenko 
 	 */
 	@JECSApi(since = "0.1.1")
-	public static final class JECSReflect
+	static final class Reflect
 	{
 		/**
 		 * Return class form Object.
@@ -253,20 +253,72 @@ public class JECS<Component extends Object> implements Runnable
 	    }
 	}
 	
+	/**
+	 * This class controls and is responsible for the current context of the JECS used. It 
+	 * contains detailed information about the system, and we don't recommend changing the 
+	 * values unless you know what to do.
+	 */
+	@JECSApi(since = "0.1.6")
+	public static final class Context
+	{
+		/**Global system counter.*/
+	    static final ArrayList<JECS<?>> systems;
+		static{
+			systems = new ArrayList<JECS<?>>();
+		}
+		
+		/**
+		 * Instantiate new system instance.
+		 */
+		@SuppressWarnings("unchecked")
+		@JECSApi(since = "0.1.6")
+		static <CompObj extends Object> JECS<CompObj> newInstance()
+		{
+			JECS<?> instance = null;
+			systems.add(instance);
+			return (JECS<CompObj>) (instance = new JECS<CompObj>());
+		}
+		
+		/**
+		 * Delete system instance.
+		 */
+		@JECSApi(since = "0.1.6")
+		static <CompObj extends Object> JECS<CompObj> deleteInstance(JECS<CompObj> instance)
+		{
+			systems.remove(instance);
+			instance = null;
+			System.gc(); //attempt to clear memory from handle.
+			return instance;
+		}
+		
+		/**
+		 * Return new system instance by index.
+		 */
+		@JECSApi(since = "0.1.6")
+		public static JECS<?> getInstance(int index)
+		{
+			return systems.get(index);
+		}
+		
+		/**If {@link #randomEntityGenerator} if enabled then will runs random generator of valid entities, otherwise basic 
+		 * increment generator.*/
+		public boolean ctxRandomEntityGenerator = true;
+		/**Max count of entities available by this handle.*/
+		public int     ctxMaxEntities = Integer.MAX_VALUE - 1;
+		/**Max count of components available by this handle.*/
+		public int     ctxMaxComponents = Short.MAX_VALUE - 1;
+		/**Default value of pack capacity.*/
+		public int     ctxDefaultPackCapacity = 1;
+		/**If true, then {@link JECSException} would'nt throws with validation error msg if need.*/
+		public boolean ctxDisableExceptionMessages = false;
+	}
+	
 	//=========================================
 	//			JECSHandle Class
 	//=========================================
 	
 	/**Global statistic thing to calculate how many entities were created.*/
 	static int entityCount = -1;
-	/**If true, then {@link JECSException} will throws with validation error msg if need.*/
-	static boolean randomEntityGenerator = true;
-	/**Max count of entities available by this handle.*/
-	protected static final int MAX_ENTITIES = Integer.MAX_VALUE - 1;
-	/**Max count of components available by this handle.*/
-	protected static final int MAX_COMPONENTS = Short.MAX_VALUE - 1;
-	/**Default value of pack capacity.*/
-	protected static final int DEFAULT_PACK_CAPACITY = 1;
 	/**This is random entity generator.*/
 	private static Random RAN_GENERATOR;
 	/**This is non-random entity generator.*/
@@ -281,6 +333,8 @@ public class JECS<Component extends Object> implements Runnable
 	private volatile EntityContainer<Integer, ComponentSequence<Component>> container;
 	/**Packs of components to store and for better iteration time.*/
 	private volatile SortedMap<Integer, ComponentSequence<Component>> packs;
+	/**Contains information about this handle.*/
+	private Context context;
 	
 	/**Just null is already exist + im love C++.*/
 	@JECSApi
@@ -389,28 +443,26 @@ public class JECS<Component extends Object> implements Runnable
 	@JECSApi(since = "0.1.1", funcDesc = "constructor")
 	public static <CompObj extends Object> JECS<CompObj> construct()
 	{
-		return new JECS<CompObj>();
+		return Context.newInstance();
 	}
 
 	/**
 	 * Deallocate and deconstruct this <code>system</code>.
 	 * 
-	 * @param handle to be destroyed.
+	 * @param instance to be destroyed.
 	 * @return <code>Null</code> instance of constructed system.
 	 */
 	@JECSApi(since = "0.1.1", funcDesc = "destructor")
-	public static <CompObj extends Object> JECS<CompObj> deconstruct(JECS<CompObj> handle)
+	public static <CompObj extends Object> JECS<CompObj> deconstruct(JECS<CompObj> instance)
 	{
-		if(handle != null)
+		if(instance != null)
 		{
 			try {
-				handle.destroyAll();
-				handle = null;
-				System.gc(); //attempt to clear memory from handle.
-				return handle;
+				instance.destroyAll();
 			} catch (JECSException e) {e.printStackTrace();}
+			return Context.deleteInstance(instance);
 		}
-		throw new NullPointerException("Input handle not exist or already has been destructed.");
+		throw new NullPointerException("Input instance not exist or already has been destructed.");
 	}
 	
 	/**
@@ -428,15 +480,18 @@ public class JECS<Component extends Object> implements Runnable
 		Thread thread = new Thread(this, "JECS System Thread");
 		thread.start();
 		
+		if(context == null)
+			context = new Context();
+		
 		try(org.lwjgl.system.MemoryStack s = stackPush()) {
 			entities = new ArrayList<Integer>();			
 			//entts = new TreeMap<Integer, Integer>();
 			container = new EntityContainerImpl<Integer, ComponentSequence<Component>>();
 			packs = new TreeMap<Integer, ComponentSequence<Component>>();
-			for(int i = 0; i < DEFAULT_PACK_CAPACITY; i++)
+			for(int i = 0; i < context.ctxDefaultPackCapacity; i++)
 				packs.put(i, new ComponentSequenceImpl<Component>());
 			
-			if(randomEntityGenerator)
+			if(context.ctxRandomEntityGenerator)
 				RAN_GENERATOR = new Random();
 			else
 				NON_RAN_GENERATOR = -1;
@@ -444,8 +499,6 @@ public class JECS<Component extends Object> implements Runnable
 			if(!container.isEmpty())
 				this.clear();
 		}
-		
-		System.out.println(Thread.currentThread());
 	}
 	
 	/**
@@ -459,9 +512,9 @@ public class JECS<Component extends Object> implements Runnable
 	{
 		try(org.lwjgl.system.MemoryStack s = stackPush()) {
 			IntBuffer pEntity = s.mallocInt(1);
-			if(randomEntityGenerator)
+			if(context.ctxRandomEntityGenerator)
 				pEntity.put(0, generateRandomEntity());
-			else if(NON_RAN_GENERATOR < MAX_ENTITIES)
+			else if(NON_RAN_GENERATOR < context.ctxMaxEntities)
 				pEntity.put(0, NON_RAN_GENERATOR++);
 			return pEntity.get(0);
 		}
@@ -475,7 +528,7 @@ public class JECS<Component extends Object> implements Runnable
 	@JECSApi(since = "0.1.5")
 	private final int generateRandomEntity()
 	{
-		return RAN_GENERATOR.nextInt(MAX_ENTITIES);
+		return RAN_GENERATOR.nextInt(context.ctxMaxEntities);
 	}
 	
 	/**
@@ -488,7 +541,7 @@ public class JECS<Component extends Object> implements Runnable
 			IntBuffer pEntity = s.mallocInt(1);
 			pEntity.put(generateEntity()).flip(); 
 			
-			if(pEntity.get(0) < 0)
+			if(pEntity.get(0) < 0 || pEntity.get(0) > context.ctxMaxEntities)
 				return create();
 			
 			if(container.containsKey(pEntity.get(0)))
@@ -586,7 +639,6 @@ public class JECS<Component extends Object> implements Runnable
 	public final int insert(int entity, int count)
 	{
 		entities.add(entity);
-		//entts.put(count, entity);
 		
 		//create components array represents component as data structure for entity.
 		ComponentSequence<Component> components = new ComponentSequenceImpl<Component>();
@@ -871,12 +923,12 @@ public class JECS<Component extends Object> implements Runnable
 				
 						if(getCtorArgT(componentT, i, j).isInterface())
 						{
-							if(safeAsSubClass(JECSReflect.getClass(args[j]), getCtorArgT(componentT, i, j), baseMsg + "Cannot compare intefrace<"+getCtorArgT(componentT, i, j).getName()+
+							if(safeAsSubClass(Reflect.getClass(args[j]), getCtorArgT(componentT, i, j), baseMsg + "Cannot compare intefrace<"+getCtorArgT(componentT, i, j).getName()+
 									"> with class<"+objectArgsType[j]+">.") != null)
 								classArgsType[j] = objectArgsType[j]; 
 						}
 
-						classArgsType[j] = sort(classArgsType[j], JECSReflect.getClass(args[j])).getTypeName();
+						classArgsType[j] = sort(classArgsType[j], Reflect.getClass(args[j])).getTypeName();
 						if(classArgsType[j].contentEquals(objectArgsType[j]))
 						{
 							if(j == pCounts.get(1)  - 1) 
@@ -2270,6 +2322,15 @@ public class JECS<Component extends Object> implements Runnable
 		} else if (!packs.equals(other.packs))
 			return false;
 		return true;
+	}
+	
+	/**
+	 * Return the context of this instance.
+	 */
+	@JECSApi(since = "0.1.6")
+	public Context getContext()
+	{
+		return context;
 	}
 
 	@JECSApi(since = "0.1.*")

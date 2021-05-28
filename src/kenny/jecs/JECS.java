@@ -59,7 +59,7 @@ import kenny.jecs.funcs.EachI;
  * Entity that possesses a Component of the same aspect as that System."
  * <p>
  * Example: 
- * <pre>
+ * <code><pre>
  * JECS<<Object>Object> jecs = JECS.construct();
  * 
  * int entity = jecs.create(); 
@@ -79,7 +79,7 @@ import kenny.jecs.funcs.EachI;
  *
  * jecs.destroy(entity); 
  * jecs = JECS.deconstruct(jecs);
- * </pre>>
+ * </code></pre>
  * 
  * @param <Component> This is starting hierarchy of component, by default set by Object.
  * You can use any object as a beginning. Any <code>Component</code> object extends of <code>Component</code> will 
@@ -951,6 +951,7 @@ public class JECS<Component extends Object> implements Runnable
 			
 			// Compare each component ctor with input args.
 			boolean validArgument = false;
+			boolean foundCtor = false;
 			int ctorIdx = 0;
 			for(Constructor<?> ctor : componentT.getConstructors()) {
 				boolean isLastCtor = ctorIdx == componentT.getConstructors().length - 1;
@@ -1018,6 +1019,13 @@ public class JECS<Component extends Object> implements Runnable
 								finalCtorArgs[argIdx] = sortR(arg.getName(), arg);
 							validArgument = true;
 						}
+						
+						// If argIdx == arg element length and is valid arg, that means we found constructor.
+						if(argIdx == ctor.getParameterTypes().length - 1 && validArgument) {
+							foundCtor = true;
+							break;
+						}
+						
 						argIdx++;
 					}
 				}
@@ -1028,6 +1036,10 @@ public class JECS<Component extends Object> implements Runnable
 					for(Constructor<?> ct : componentT.getConstructors()) avaliableCtors += TAB + " " + ct;
 						throw new JECSUndifiendBehaviourError(errorMsg + avaliableCtors);
 				} 
+				
+				if(foundCtor)
+					break;
+				
 				ctorIdx++;
 			}
 		} else {

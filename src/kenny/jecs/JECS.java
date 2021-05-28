@@ -11,12 +11,12 @@ import java.lang.reflect.Constructor;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Parameter;
 import java.lang.reflect.Method;
+import java.lang.reflect.Modifier;
 import java.lang.reflect.ParameterizedType;
 import java.nio.ByteBuffer;
 import java.nio.IntBuffer;
 import java.nio.charset.Charset;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Iterator;
 import java.util.List;
 import java.util.ListIterator;
@@ -26,6 +26,7 @@ import java.util.Random;
 import java.util.SortedMap;
 import java.util.TreeMap;
 import java.util.Map.Entry;
+
 import kenny.jecs.collection.ComponentSequence;
 import kenny.jecs.collection.ComponentSequenceImpl;
 import kenny.jecs.collection.EntityContainer;
@@ -58,12 +59,14 @@ import kenny.jecs.funcs.EachI;
  * Entity that possesses a Component of the same aspect as that System."
  * <p>
  * Example: 
- * <blockquote><pre>
+ * <pre>
  * JECS<<Object>Object> jecs = JECS.construct();
  * 
  * int entity = jecs.create(); 
  * jecs.emplace(entity, new TransformComponent()); 
- * 	
+ * or
+ * jecs.emplace(entity, TransformComponent.class, NULL); 
+ *
  * while(jecs.has(TransformComponent.class)) 
  * {
  * 	TransformComponent t = jecs.get(entity, TransformComponent.class);
@@ -76,18 +79,18 @@ import kenny.jecs.funcs.EachI;
  *
  * jecs.destroy(entity); 
  * jecs = JECS.deconstruct(jecs);
- * </pre></blockquote>
+ * </pre>>
  * 
  * @param <Component> This is starting hierarchy of component, by default set by Object.
  * You can use any object as a beginning. Any <code>Component</code> object extends of <code>Component</code> will 
  * be recognize for system has a component. 
  * 
  * @author Danil (Kenny) Dukhovenko 
- * @version 0.1.6
+ * @version 0.1.7
  * 
  * TODO: Add multithreading support + bug fixes.
  */
-@JECS.JECSApi(since =  "0.1.6")
+@JECS.JECSApi(since =  "0.1.7")
 public class JECS<Component extends Object> implements Runnable
 {	 
 	/**
@@ -205,9 +208,9 @@ public class JECS<Component extends Object> implements Runnable
 		 * @see Class.getClass().getConstructors()[ctorIdx].getParameters()[argIdx]
 		 */
 		@JECSApi
-		static final Class<?> getCtorArgT(Class<?> сlazz, int ctorIdx, int argIdx)
+		static final Class<?> getCtorArgT(Class<?> clazz, int ctorIdx, int argIdx)
 		{
-			return getCtorArg(сlazz, ctorIdx, argIdx).getType();
+			return getCtorArg(clazz, ctorIdx, argIdx).getType();
 		}
 		
 		/**
@@ -311,6 +314,29 @@ public class JECS<Component extends Object> implements Runnable
 		public int     ctxDefaultPackCapacity = 1;
 		/**If true, then {@link JECSException} would'nt throws with validation error msg if need.*/
 		public boolean ctxDisableExceptionMessages = false;
+		/*True its enable optimization.*/
+		public static boolean ctxRelease = false;
+	}
+	
+	/**
+	 * This class represents null arguments accepted by {@link JECS#emplace(Number, Class, Object...)} or
+	 * {@link JECS#replace(Number, Class, Object...)} or its one of array versions to call the appropriate 
+	 * method or other similar method where instead of empty args should pass some arg to call approporate
+	 * method. 
+	 * <P>
+	 * Because there is an <code>emplace</code> method that accepts the entity and the object of the
+	 * component (already created) and an <code>emplace</code> that  accepts the entity, the type of the 
+	 * component and the argument, which can be 0, that is, empty and  in this situation will be called 
+	 * by an <code>emplace</code> with an instance and we do not need this, so if you do not have arguments,
+	 * just add NULL as the first argument.
+	 */
+	@JECSApi(since = "0.1.7", funcDesc = "constant")
+	static final class NULL {}
+	
+	/** NULL constant. See {@link NULL}. */ 
+	public static final JECS.NULL NULL; 
+	static {
+		NULL = new NULL();
 	}
 	
 	//=========================================
@@ -324,7 +350,8 @@ public class JECS<Component extends Object> implements Runnable
 	/**This is non-random entity generator.*/
 	private static int NON_RAN_GENERATOR;
 	/**{@link JECSUndifiendBehaviourError} message base.*/
-	private static final String baseMsg = "Cannot construct component from args.\n";
+	private static final String TAB = "\n    ";
+	private static final String baseMsg = "Cannot construct component from args.\n" + TAB + "[DETAIL DESCRIPTION]:\n";
 	/**Array of entities for searching to find component of that entity.*/
 	private volatile ArrayList<Integer> entities;
 	/**Array of entities for searching to find component of that entity.*/
@@ -393,10 +420,8 @@ public class JECS<Component extends Object> implements Runnable
 	 * Sort the string and maps primitive types of classes to objects of these types.
 	 */
 	@JECSApi(since = "0.1.3")
-	private static final Class<?> sort(String s, Class<?> t)
-	{
-		switch (s) 
-		{
+	private static final Class<?> sort(String s, Class<?> t){
+		switch (s) 	{
 			case "byte[]"  : return String.class;
 			case "int"	   : return Integer.class;
 			case "float"   : return Float.class;
@@ -414,10 +439,8 @@ public class JECS<Component extends Object> implements Runnable
 	 * Sort the string and maps objects of primitive types to their normal non-object types.
 	 */
 	@JECSApi(since = "0.1.3")
-	private static final Class<?> sortR(String s, Class<?> t)
-	{
-		switch (s) 
-		{
+	private static final Class<?> sortR(String s, Class<?> t){
+		switch (s) {
 			case "java.lang.Integer"  : return int.class;
 			case "java.lang.Float"    : return float.class;
 			case "java.lang.Boolean"  : return boolean.class;
@@ -441,9 +464,17 @@ public class JECS<Component extends Object> implements Runnable
 	 * @return New instance of constructed system.
 	 */
 	@JECSApi(since = "0.1.1", funcDesc = "constructor")
-	public static <CompObj extends Object> JECS<CompObj> construct()
-	{
+	public static <CompObj extends Object> JECS<CompObj> construct() {
 		return Context.newInstance();
+	}
+	
+	/**
+	 * Construct instance without validation check. Look at {@link JECS#construct()}.
+	 */
+	@JECSApi(since = "0.1.7", funcDesc = "constructor")
+	public static <CompObj extends Object> JECS<CompObj> construct(boolean optimizedMode) {
+		Context.ctxRelease = optimizedMode;	
+		return construct();
 	}
 
 	/**
@@ -453,10 +484,8 @@ public class JECS<Component extends Object> implements Runnable
 	 * @return <code>Null</code> instance of constructed system.
 	 */
 	@JECSApi(since = "0.1.1", funcDesc = "destructor")
-	public static <CompObj extends Object> JECS<CompObj> deconstruct(JECS<CompObj> instance)
-	{
-		if(instance != null)
-		{
+	public static <CompObj extends Object> JECS<CompObj> deconstruct(JECS<CompObj> instance) {
+		if(instance != null) {
 			try {
 				instance.destroyAll();
 			} catch (JECSException e) {e.printStackTrace();}
@@ -475,8 +504,7 @@ public class JECS<Component extends Object> implements Runnable
 	 */
 	@JECSApi(funcDesc = "constructor")
 	@Deprecated(since = "use JECSHandle.construct() instead", forRemoval = false)
-	private JECS() 
-	{
+	private JECS() {
 		Thread thread = new Thread(this, "JECS System Thread");
 		thread.start();
 		
@@ -485,7 +513,6 @@ public class JECS<Component extends Object> implements Runnable
 		
 		try(org.lwjgl.system.MemoryStack s = stackPush()) {
 			entities = new ArrayList<Integer>();			
-			//entts = new TreeMap<Integer, Integer>();
 			container = new EntityContainerImpl<Integer, ComponentSequence<Component>>();
 			packs = new TreeMap<Integer, ComponentSequence<Component>>();
 			for(int i = 0; i < context.ctxDefaultPackCapacity; i++)
@@ -501,6 +528,23 @@ public class JECS<Component extends Object> implements Runnable
 		}
 	}
 	
+	@JECSApi(since = "0.1.7")
+	@FunctionalInterface
+	public interface ElapseFn { public void fn(); }
+	
+   /**
+ 	* The "traditional" way to measure time of JECS method invokation.
+ 	* 
+ 	* @param fn - Method where will called JECS method/s to measure time in milliseconds.
+ 	* @return Meausered time in milliseconds.
+ 	*/
+	@JECSApi(since = "0.1.7")
+	public final long elapsed(ElapseFn fn) {
+		long s = System.currentTimeMillis();
+		fn.fn();
+		return System.currentTimeMillis() - s;
+	}
+	
 	/**
 	 * Generate a simple valid entity indentifier. If {@link #randomEntityGenerator} if enabled
 	 * then will runs random generator of valid entities, otherwise basic increment generator.
@@ -508,8 +552,7 @@ public class JECS<Component extends Object> implements Runnable
 	 * @return Returns new generated valid entity.
 	 */
 	@JECSApi(since = "0.1.5")
-	private final int generateEntity()
-	{
+	private final int generateEntity() {
 		try(org.lwjgl.system.MemoryStack s = stackPush()) {
 			IntBuffer pEntity = s.mallocInt(1);
 			if(context.ctxRandomEntityGenerator)
@@ -526,8 +569,7 @@ public class JECS<Component extends Object> implements Runnable
 	 * @return Returns new generated valid entity.
 	 */
 	@JECSApi(since = "0.1.5")
-	private final int generateRandomEntity()
-	{
+	private final int generateRandomEntity() {
 		return RAN_GENERATOR.nextInt(context.ctxMaxEntities);
 	}
 	
@@ -535,8 +577,7 @@ public class JECS<Component extends Object> implements Runnable
 	 * {@link #create()}.
 	 */
 	@JECSApi(since = "0.1.0")
-	private final int create0()
-	{
+	private final int create0() {
 		try(org.lwjgl.system.MemoryStack s = stackPush()) {
 			IntBuffer pEntity = s.mallocInt(1);
 			pEntity.put(generateEntity()).flip(); 
@@ -544,9 +585,8 @@ public class JECS<Component extends Object> implements Runnable
 			if(pEntity.get(0) < 0 || pEntity.get(0) > context.ctxMaxEntities)
 				return create();
 			
-			if(container.containsKey(pEntity.get(0)))
-			{
-				//if entity id already created its destroyed and recreates.
+			if(container.containsKey(pEntity.get(0))) {
+				// If entity id already created its destroyed and recreates.
 				try {
 					destroy(pEntity.get(0));
 				} catch (JECSException e) {
@@ -573,12 +613,11 @@ public class JECS<Component extends Object> implements Runnable
 	 * @return A valid entity identifier.
 	 */
 	@JECSApi(since = "0.1.0")
-	public final int create()
-	{	
+	public final int create() {	
 		try(org.lwjgl.system.MemoryStack s = stackPush()) {
 			IntBuffer pEntity = s.mallocInt(1);
 			pEntity.put(0, create0()); 
-			//insert entity id and count in global order.
+			// Insert entity id and count in global order.
 			return insert(pEntity.get(0), entityCount++); 	
 		}
 	}
@@ -602,15 +641,14 @@ public class JECS<Component extends Object> implements Runnable
 	 * @return A valid entity identifier.
 	 */
 	@JECSApi(since = "0.1.5")
-	public final int create(CreateI func)
-	{	
+	public final int create(CreateI func) {	
 		try(org.lwjgl.system.MemoryStack s = stackPush()) {
 			IntBuffer pEntity = s.mallocInt(1);
 			pEntity.put(0, create0());
 			Create funcImpl = Create.create(func);
 			funcImpl.invoke(pEntity.get(0));
 				
-			//insert entity id and count in global order.
+			// Insert entity id and count in global order.
 			return insert(pEntity.get(0), entityCount++); 
 		}
 	}
@@ -620,8 +658,7 @@ public class JECS<Component extends Object> implements Runnable
 	 */
 	@Deprecated(since = "use .insert(int) instead")
 	@JECSApi(since = "0.1.2")
-	public final int[] create(int count)
-	{
+	public final int[] create(int count) {
 		return insert(count);
 	}
 	
@@ -629,18 +666,19 @@ public class JECS<Component extends Object> implements Runnable
 	 * Assign <code>entity</code> identifier to container. 
 	 * <p>
 	 * Example:
-	 * <blockquote><pre>
+	 * <pre>
 	 * system.insert(entity, system.size() - 1);
-	 * </blockquote></pre>
+	 * </pre>
 	 * @param entity - The entity to be inserted.
 	 * @param count - Count order of entity to be created.
+	 * 
+	 * @return  Valid entity identifier.
 	 */
 	@JECSApi(since = "0.1.2")
-	public final int insert(int entity, int count)
-	{
+	public final int insert(int entity, int count) {
 		entities.add(entity);
 		
-		//create components array represents component as data structure for entity.
+		// Create components array represents component as data structure for entity.
 		ComponentSequence<Component> components = new ComponentSequenceImpl<Component>();
 		container.emplace(entity, components);
 		return entity;
@@ -655,8 +693,7 @@ public class JECS<Component extends Object> implements Runnable
 	 * @return A array of valid entities identifiers.
 	 */
 	@JECSApi(since = "0.1.2")
-	public final int[] insert(int count)
-	{
+	public final int[] insert(int count){
 		int entities[] = new int[count];
 		for(int i = 0; i < count; i++)
 			entities[i] = create();
@@ -676,26 +713,22 @@ public class JECS<Component extends Object> implements Runnable
 	@SuppressWarnings("unchecked")
 	@JECSApi(since = "0.1.0")
 	public final <E extends Number> E destroy(E entity)  
-			throws JECSException
-	{
+			throws JECSException {
 		validationCheck(entity, "to remove");
 		
-		//remove all components from this entity.
+		// Remove all components from this entity.
 		ComponentSequence<Component> components = container.get(entity);
-		for(int i = 0; i < components.size(); i++)
-		{
+		for(int i = 0; i < components.size(); i++) {
 			Class<? extends Component> componentT = (Class<? extends Component>) components.get(i).getClass();
 			erase(entity, componentT);
 		}
 		
 		container.erase((Integer) entity, components);
 		entities.remove((Integer) entity);
-		//entts.remove(--entityCount, entity);
 		entityCount = entities.size() - 1;
 		
-		//is entity doesn't exist, that its succesfful removed and retuned -1. 
-		if(!container.containsKey(entity))
-		{
+		// Is entity doesn't exist, that its succesfful removed and retuned -1. 
+		if(!container.containsKey(entity)) {
 			Integer answer = -1;	
 			entity = (E) answer;
 		}
@@ -722,8 +755,7 @@ public class JECS<Component extends Object> implements Runnable
 	 */
 	@JECSApi(since = "0.1.5")
 	public final <E extends Number> E destroy(E entity, DestroyI func)  
-			throws JECSException
-	{
+			throws JECSException {
 		Destroy funcImpl = Destroy.create(func);
 		funcImpl.invoke(entity.intValue());
 		
@@ -742,12 +774,10 @@ public class JECS<Component extends Object> implements Runnable
 	 */
 	@SafeVarargs
 	@JECSApi(since = "0.1.0")
-	public final <E extends Number> int destroy(E... entities)
-	{
+	public final <E extends Number> int destroy(E... entities) {
 		try(org.lwjgl.system.MemoryStack s = stackPush()) {
 			IntBuffer pTotalRemoved = s.callocInt(1);
-			for(E e : entities)
-			{
+			for(E e : entities) {
 				try {
 					destroy(e);
 					pTotalRemoved.put(0, pTotalRemoved.get(0) + 1);
@@ -768,16 +798,13 @@ public class JECS<Component extends Object> implements Runnable
 	 * @throws JECSException 
 	 */
 	@JECSApi(since = "0.1.0")
-	public final void destroyAll() throws JECSException
-	{
+	public final void destroyAll() throws JECSException {
 		int entity = 0;
 		ComponentSequence<Component> components = null;
 		
-		while(!empty())
-		{
+		while(!empty()) {
 			Iterator<Integer> enttItr = container.keySet().iterator();
-			while(enttItr.hasNext())
-			{
+			while(enttItr.hasNext()) {
 				entity = enttItr.next();
 				
 				if(entity <= -1)
@@ -788,8 +815,7 @@ public class JECS<Component extends Object> implements Runnable
 				
 				//remove all components from this entity.
 				components = container.get(entity);
-				if(!components.isEmpty())
-				{
+				if(!components.isEmpty()) {
 					@SuppressWarnings("unchecked")
 					Class<? extends Component> componentT = (Class<? extends Component>) components.get(0).getClass();
 					erase(entity, componentT);
@@ -821,15 +847,12 @@ public class JECS<Component extends Object> implements Runnable
 	 * @throws JECSException if try to destory unexisting entity.
 	 */
 	@JECSApi(since = "0.1.1")
-	public final int destroyInRange(int minRange, int maxRange)
-	{
+	public final int destroyInRange(int minRange, int maxRange) {
 		int totalRemoved = 0;
 		
-		for(int entity : this.entities)
-		{
+		for(int entity : this.entities) {
 			if(entities.indexOf(entity) >= minRange && 
-					entities.indexOf(entity) <= maxRange)
-			{
+					entities.indexOf(entity) <= maxRange) {
 				try {
 					destroy(entity);
 					totalRemoved++;
@@ -867,127 +890,212 @@ public class JECS<Component extends Object> implements Runnable
 	
 	/**
 	 * Construct new {@link java.lang.Object} from input arguments. There is a detailed description under 
-	 * each implementation.
+	 * each {@link #emplace(E, Class, Object...)} implementation. If user try construct inner class it doesn't need to put the top class 
+	 * argument this method determines this automatically.
+	 * <p>
+	 * <b>Inner class support:</b> (<code>p</code> - package, <code>A, B, C</code>, ... ,  <code>n</code> - inner
+	 * class name, <code>$</code> - class seperator. ) If <code>B</code> inside <code>A</code> or <code>C</code> inside
+	 * <code>B</code> (inner classes) etc... then  this should work, because im call the invisible (default) ctor
+	 * of inner class with only one arg of top class ( <code>public p.A$B(p.A)</code> ) or zero arg (<code> public p.A()</code> ).
+	 * <p>
+	 * If some of top class have user ctor with args then they will be ignored because it is impossible 
+	 * to understand what exactly the user needs a ctor, such are the victims of reflection. 
+	 * <p>
+	 * In general this function not safty if use it internal, it can throw many unhandled exceptions and can accept
+	 * <code>null</code> objects to also can break the system.
 	 * 
-	 * @param entity Valid entity.
 	 * @param componentT - {@link Object} will return.
 	 * @param args - Argument to {@link Object} constructor.
+	 *
+	 * @return New instance of {@link Object} component.
+	 *
+	 * @throws JECSUndifiendBehaviourError - If user try to place incorrect arg of component
 	 * @throws ClassNotFoundException If type <code>C</code> is not exist.
-	 * @throws SecurityException 
-	 * @throws NoSuchMethodException 
-	 * @throws InvocationTargetException 
+	 * @throws NoSuchMethodException If Java does not find a suitable constructor for the passed arguments of object <code>C</code>. 
+	 * In this case, create this constructor in the class with the following arguments.
+	 * @throws InvocationTargetException
+	 * @throws SecurityException  
 	 * @throws IllegalArgumentException 
 	 * @throws IllegalAccessException 
 	 * @throws InstantiationException 
 	 */
-	@JECSApi(since = "0.1.3", funcDesc = "fromArgs obj")
-	private final <E extends Number, C extends Component> C fromArgs(E entity, Class<C> componentT,
-			Object... args) throws JECSException, NoSuchMethodException, SecurityException, 
-					ClassNotFoundException, InstantiationException, IllegalAccessException, IllegalArgumentException, 
-							InvocationTargetException
-	{
-		try(org.lwjgl.system.MemoryStack stack = stackPush()) {
-			ByteBuffer success = stack.malloc(1);
-			ByteBuffer pCounts = stack.malloc(3); //pointer to array with (cCount, cArgsCount, oArgsCount)
-
-			pCounts.put(0, (byte) getCtors(componentT).length); 
-			if(pCounts.get(0) == 0 && args.length != 0)
+	@SuppressWarnings("unchecked")
+	@JECSApi(since = "0.1.3, last = 0.1.7", funcDesc = "constructFromArgs obj")
+	private final <E extends Number, C extends Component> C constructFromArgs(Class<C> componentT, Object... args) 
+			throws JECSException, SecurityException, 
+					ClassNotFoundException, NoSuchMethodException, InstantiationException, IllegalAccessException, IllegalArgumentException, 
+							InvocationTargetException {
+		
+		// This arguments will be pass to get currect costructor and invoke it.
+		Class<?>[] finalCtorArgs = null;
+	
+		// Top level class info if componentT is member.
+		Class<?> enclosingClassInfo = componentT.getEnclosingClass();
+		boolean isInnerClass = enclosingClassInfo != null;
+		boolean isInnerStaticClass = false;
+		boolean isInnerCheck = false;
+		boolean isNullArgs = false;
+		
+		// Convert java null arguments to constant NULL.
+		if(args == null)    
+			args = new Object[] { NULL };
+		else if(args[0] == NULL) 
+			isNullArgs = true;
+		
+		// If user pass NULL constant skip hole code and invoke.
+		if(!isNullArgs) {
+			// Compare stage: The stage of checking constructors and their parameters.
+			int argsCount = 0, passedArgsCount = args.length;
+			if(componentT.getConstructors().length == 0 && args.length != 0)
 				throw new JECSUndifiendBehaviourError(baseMsg + "Component <"+ componentT.getTypeName() +"> without default constructor cannot have args!");
 			
-			//for each component ctor check count args
-			for(int i = 0; i < pCounts.get(0); i++)
-			{
-				pCounts.put(1, (byte) getCtorArgsCount(componentT, i));
-				pCounts.put(2, (byte) args.length);
-				if(pCounts.get(1) == pCounts.get(2))
-				{
-					//if default ctor
-					if(pCounts.get(1) == 0)
-					{
-						success.put(0, (byte)1); break; //true
-					}
-					
-					//component ctor args class array
-					String[] classArgsType = new String[pCounts.get(1)];
-					String[] objectArgsType = new String[pCounts.get(2)];
-					
-					//Check args types
-					for(int j = 0; j < pCounts.get(1); j++)
-					{
-						//check enclosing clases
-						if(componentT.getEnclosingClass() != null)
-							throw new JECSUndifiendBehaviourError(baseMsg + "Component class must be host not enclosing! Is not support for now.");
-						
-						objectArgsType[j] = getClassS(args[j]); 
-						classArgsType[j] = getCtorArgS(componentT, i, j); 
+			// Compare each component ctor with input args.
+			boolean validArgument = false;
+			int ctorIdx = 0;
+			for(Constructor<?> ctor : componentT.getConstructors()) {
+				boolean isLastCtor = ctorIdx == componentT.getConstructors().length - 1;
+				argsCount = ctor.getParameterCount();
 				
-						if(getCtorArgT(componentT, i, j).isInterface())
-						{
-							if(safeAsSubClass(Reflect.getClass(args[j]), getCtorArgT(componentT, i, j), baseMsg + "Cannot compare intefrace<"+getCtorArgT(componentT, i, j).getName()+
-									"> with class<"+objectArgsType[j]+">.") != null)
-								classArgsType[j] = objectArgsType[j]; 
-						}
-
-						classArgsType[j] = sort(classArgsType[j], Reflect.getClass(args[j])).getTypeName();
-						if(classArgsType[j].contentEquals(objectArgsType[j]))
-						{
-							if(j == pCounts.get(1)  - 1) 
-							{
-								success.put(0, (byte)1); //true
-								break;
-							}
+				if(isInnerClass && !isInnerCheck) {
+					isInnerStaticClass = Modifier.isStatic(componentT.getModifiers());
+					if(!isInnerStaticClass) {
+						passedArgsCount++;
+						isInnerCheck = true;
+					}
+				}
+				
+				// If is empty ctor, stop iterate over all ctors and go to invoke stage.
+				boolean isEmptyCtor = passedArgsCount == 0 && argsCount == 0;
+				if(isEmptyCtor) {
+					break; //true
+				}
+				
+				// True if args.length zero i.e default ctor or if number of arguments will the same 
+				// from args.length and componentT ctor count.
+				boolean isSuitableCtor = isEmptyCtor || passedArgsCount == ctor.getParameterCount();
+				if(isSuitableCtor) {
+					finalCtorArgs = new Class<?>[passedArgsCount];
+					
+					//Compare each component param/arg in current ctor.
+					int argIdx = 0, argShift = 0;
+					for(Class<?> arg : ctor.getParameterTypes()) {
+						// Non-static inner situation. We shoold add instance of top class as zero arg before 
+						// invoke.
+						if(isInnerClass && !isInnerStaticClass && argIdx == 0) {
+							finalCtorArgs[0] = enclosingClassInfo;
+							argShift++;
+							argIdx++;
 							continue;
 						}
-						else
-							throw new JECSUndifiendBehaviourError(baseMsg + "Try to place incorrect arg of component <"+ componentT.getName() + ">. " 
-								+ "Component arg"+ j + "["+classArgsType[j]+"] not equals input arg"+j+"["+objectArgsType[j] +"] type!");
-					}	
-					classArgsType = null;
-					objectArgsType = null;
+						
+						Class<?> passedArg = args[argIdx - argShift].getClass();
+						// Interface/annotation situation.
+						if(arg.isInterface()) {
+							if(safeAsSubClass(passedArg, arg, baseMsg + 
+									"Cannot compare interface <" + arg + "> with class <" + passedArg + ">.") != null) {
+								arg = passedArg;
+							}
+						}
+						
+						// Narrow conversion beetwen primitives and its wrappers.
+						boolean isPrimitive = arg.isPrimitive();
+						if(isPrimitive) 
+							arg = sort(arg.getName(), arg);
+						
+						// Compare normal arguments.
+						if(passedArg != arg) {
+							if(!isLastCtor)  {
+								validArgument = false;
+								break;
+							}
+
+							throw new JECSUndifiendBehaviourError(baseMsg + TAB + "Try to place incorrect arg of component <" + componentT.getName() + ">. " 
+									+ "Component " + TAB + "arg"+ argIdx + "[" + arg + "] not equals passed arg" + argIdx + "["+ passedArg +"] type of costructor" + TAB + ctor +"!");
+						} else {
+							if(!isPrimitive)
+								finalCtorArgs[argIdx] = passedArg;
+							else
+								finalCtorArgs[argIdx] = sortR(arg.getName(), arg);
+							validArgument = true;
+						}
+						argIdx++;
+					}
 				}
-				
-				//if args != component.args count and it last ctor then throw error.
-				if(args.length != pCounts.get(1) && i == pCounts.get(0) - 1 && success.get(0) != 1)
-					throw new JECSUndifiendBehaviourError(baseMsg + "To much args for component <"+ componentT.getSimpleName() +">. "
-							+ "Requied " + getCtorArgsCount(componentT, 0) + ".");
+		
+				if(!isSuitableCtor && isLastCtor && !validArgument) {
+					String errorMsg = baseMsg + TAB + "There was no suitable constructor for creating " + componentT.getSimpleName() +".";
+					String avaliableCtors = TAB + "Avaliable constructors:";
+					for(Constructor<?> ct : componentT.getConstructors()) avaliableCtors += TAB + " " + ct;
+						throw new JECSUndifiendBehaviourError(errorMsg + avaliableCtors);
+				} 
+				ctorIdx++;
 			}
-			
-			//if comp success checked on args then construct it and add to map.
-			if(success.get(0) == 1)
-			{
-				//get the constructor of creaing class by args
-				Class<?>[] objectCtorArgs = new Class<?>[args.length];
-				for(int l = 0; l < objectCtorArgs.length; l++)
-				{
-					objectCtorArgs[l] = args[l].getClass();
-					if(objectCtorArgs[l].getTypeName() == "java.lang.Boolean")
-						objectCtorArgs[l] = boolean.class;
-				}
-	
-				Constructor<?> ctor = 
-						Class.forName(componentT.getName()).getConstructor(objectCtorArgs);
-			    @SuppressWarnings("unchecked")
-			    //safty cast bc args == C ctor args
-			    C componentPointer = (C) ctor.newInstance(args);
-			    return componentPointer;
-		    }
-			return null;
+		} else {
+			//Constructing stage for NULL:
+			Constructor<?>[] ctors = componentT.getDeclaredConstructors();
+			if(isInnerClass && !isInnerStaticClass) {
+				Object[] argss = getInnerObjects(args, finalCtorArgs, isNullArgs);
+				return (C) ctors[0].newInstance(argss);
+			} else 
+				return (C) ctors[0].newInstance((Object[])null);
 		}
+		
+		//Constructing stage:
+		if(isInnerClass && !isInnerStaticClass) {
+			Object[] argss = getInnerObjects(args, finalCtorArgs, isNullArgs);
+			return (C) componentT.getDeclaredConstructor(finalCtorArgs).newInstance(argss);
+		} else 
+			return (C) componentT.getDeclaredConstructor(finalCtorArgs).newInstance(args);
 	}
+	
+	private Object[] getInnerObjects(Object[] args, Class<?>[] finalCtorArgs, boolean isNullArgs) throws InstantiationException, IllegalAccessException, 
+		IllegalArgumentException, InvocationTargetException, SecurityException, ClassNotFoundException {
+		// Split main full inner class name to each sub-inner classes and put values in array.
+		String[] innerClassesNames = finalCtorArgs[0].getName().split("\\$");
+
+		// Construct all inner classes from 'first top' to 'last inner'.
+		Object inner = null;
+		for(int i = 0; i < innerClassesNames.length; i++) {
+			Constructor<?> innerCtor = null;
+			if(i == 0) {
+				innerCtor = Class.forName(innerClassesNames[i]).getDeclaredConstructors()[0];
+				inner = innerCtor.newInstance((Object[])null);
+				continue;
+			} else {
+				innerClassesNames[0] += "$" + innerClassesNames[i];
+				innerCtor = Class.forName(innerClassesNames[0]).getDeclaredConstructors()[0];
+				inner = innerCtor.newInstance(inner);
+			}
+		}
+		
+		//Adding the inner class to the main arguments by redefining the 'args' array.
+		Object[] argss;
+		if(!isNullArgs) {
+			argss = new Object[args.length + 1];
+			argss[0] = inner;
+			for(int i = 1; i < argss.length; i++) 
+				argss[i] = args[i - 1];
+		} else {
+			argss = new Object[1];
+			args[0] = inner;
+		}
+		
+		return argss;
+	}
+	
 	/**
 	 * Emplace <code>C</code> component with to that <code>entity</code>. Assigns the
 	 * given component to an entity.
 	 * <p>
-	 * Component class type must be the same as the component object, because class of component
-	 * reflects its state, and allows you to get a list of variables stored by the constructor
-	 * in the component class in runtime.
-	 * 
+	 * If component object is <code>null</code> then you get {@link JECSException} because you cannot
+	 * contain and hold not initialized objects.
+	 * <p>
 	 * For example:
-	 * <blockquote><pre>
+	 * <pre>
 	 * system.emplace(entity, Component.class, new Component("First", 0, true).
-	 * </blockquote></pre>
+	 * </pre>
 	 * 
-	 * Advanced version of this method is {@link #emplace(E, Class, Object[])}.
+	 * Advanced version of this method is emplace component by args {@link #emplace(E, Class, Object[])}.
 	 * @param <E> Type of entity.
 	 * @param <C> Type of component.
 	 * @param entity - The entity that the component will be attached to.
@@ -995,19 +1103,21 @@ public class JECS<Component extends Object> implements Runnable
 	 * @param component - Data structure to be added how component.
 	 */
 	@JECSApi(since = "0.1.0", funcDesc = "emplace c-object")
-	public final <E extends Number, C extends Component> C emplace(E entity, Class<C> componentT, 
-			C component) throws JECSException
-	{
+	public final <E extends Number, C extends Component> C emplace(E entity, C component) 
+			throws JECSException {
 		validationCheck(entity, "emplace component to");
 		
 		if(!contains(entity))
 			return null;
 		if(component == null)
 			throw new JECSException("Cannot emplace not initialized component!");
-		if(has(entity, componentT))
-			throw new JECSException("Component with type <" + componentT.getTypeName() + "> already existing!" );
-		if(componentT.getTypeName() != component.getClass().getTypeName())
-			throw new JECSException("Class type of < " + componentT.getTypeName() + " component does not match its object!");
+		
+		@SuppressWarnings("unchecked")
+		Class<C> clazz = (Class<C>)component.getClass();
+		if(has(entity, (Class<C>)clazz))
+			throw new JECSException("Component with type <" + clazz.getTypeName() + "> already existing!" );
+		if(clazz.getTypeName() != component.getClass().getTypeName())
+			throw new JECSException("Class type of < " + clazz.getTypeName() + " component does not match its object!");
 		
 		ComponentSequence< Component> components = container.get(entity);
 		components.emplace(component);
@@ -1023,19 +1133,27 @@ public class JECS<Component extends Object> implements Runnable
 	 * the parameters of one of the class <code>C</code> constructors and the specified arguments will be checked for 
 	 * compliance. If there is an error related to a conflict between the args and constructor arguments it will 
 	 * {@link JECSUndifiendBehaviourError} crash. If there are no errors, the object will be built in runtime.
-	 * <p> <b>Warning!</b>
-	 * This method not full support checking an enclosing classes. The component class must be the main class, 
-	 * not nested. 
+	 * For more deep information about see constructing {@link #constructFromArgs(Class, Object...)}.
+	 * <p>
+	 * If component arguments is <code>null</code> then you get {@link JECSException} because you cannot
+	 * contain and hold not initialized objects. Do not confuse this with null (zero) argument passing, since 
+	 * then the default constructor will be called if it is present. Better solution for this be use in-build
+	 * class-constant-indicator {@link NULL} to say that this constructor doesen't accept any number of arguments.
 	 * <p>
 	 * For example:
 	 * <blockquote><pre>
 	 * 	       | entty | component type | component args |
 	 * system.emplace(entity, Component.class, "First", 0, true).
 	 * </blockquote></pre>
-	 * 
+	 * <p>
+	 * If component constructor doesn't apply zero arguments pass {@link NULL}. If user pass {@link NULL} and
+	 * component won't have constructor with zero arguments its crash.
 	 * @apiNote If you are interested in performance for your program, we would recommend using the 
 	 * {@link #emplace(E, Class, C)}. method, but this will not play a big role because there will be 
-	 * a difference in speed of several nanoseconds.
+	 * a difference in speed of several nanoseconds. If your components are created once at the time of 
+	 * initialization of the program, then this will not play a role at all, and if for some reason you add
+	 * components during the operation of the application, it is better to use the option above. The conclusion
+	 * is that in fact both methods are optimized only the upper one is a couple of nanoseconds faster.
 	 * 
 	 * @param <E> Entity type
 	 * @param <C> Component type.
@@ -1043,6 +1161,10 @@ public class JECS<Component extends Object> implements Runnable
 	 * @param componentT - Class type of component.
 	 * @param args - Arguments (VarArgs) of component <code>C</code> constructor.
 	 * 
+	 * @return The emplaced component instance.
+	 *
+	 * @throws NoSuchMethodException If Java does not find a suitable constructor for the passed arguments of object <code>C</code>. 
+	 * 								 In this case, create this constructor in the class with the following arguments.
 	 * @throws JECSException If entity not valid or <code>null</code>.
 	 * @throws JECSUndifiendBehaviourError If conflict between the <code>args</code> and <code>C</code> constructor
 	 * arguments.
@@ -1052,9 +1174,7 @@ public class JECS<Component extends Object> implements Runnable
 			Object... args) throws JECSException
 	{
 		try {
-			C component = fromArgs(entity, componentT, args);
-			emplace(entity, componentT, component);
-			return component;
+			return emplace(entity, (C) constructFromArgs(componentT, args));
 		} catch (NoSuchMethodException | SecurityException | ClassNotFoundException | 
 				InstantiationException | IllegalAccessException | IllegalArgumentException | 
 				InvocationTargetException e) { e.printStackTrace(); }
@@ -1063,45 +1183,86 @@ public class JECS<Component extends Object> implements Runnable
 	}
 	
 	/**
-	 * Emplace array of <code>C</code> components with to that <code>entity</code>. This is advanced version 
-	 * of {@link #emplace(E, Class, Object[])}.
+	 * Emplace array of <code>C</code> components with different types to that <code>entity</code>. Sequence of arrays with component arguments
+	 * should be in the same order. Basically this is extended version of {@link #emplace(E, Class, Object[])}.
 	 * <p>
 	 * For a detailed description, see here -> {@link #emplace(E, Class, Object[])}.
+	 * For more deep information about constructing see -> {@link #constructFromArgs(Class, Object...)}.
 	 * <p>
 	 * For example:
-	 * <blockquote><pre>
+	 * <pre>
 	 * system.emplace(entty, 
-	 *  new Class<?>[]{ TagComponent.class,        TransformComponent.class}, 
-	 *  new Object  []{ new Object[] { "Taggiy" }, new Object[] { new Vector3f(1, 2, 0), new Vector3f(0, 0, 0), new Vector3f(1, 1, 1) } });                                                  
-	 * </blockquote></pre>
+	 * 	new Class<?>[]{ TagComponent.class,      TransformComponent.class}, 
+	 * 	new Object[] { "Taggiy" }, new Object[] { new Vector3f(1, 2, 0), new Vector3f(0, 0, 0), new Vector3f(1, 1, 1) });                                                  
+	 * </pre>
+	 * <p>
+	 * If component constructor doesn't apply zero arguments pass {@link NULL}. If user pass {@link NULL} and
+	 * component won't have constructor with zero arguments its crash.
 	 * 
 	 * @param <E> Entity type
 	 * @param <C> Component type.
 	 * @param entity - The entity identifier that the component will be attached to.
 	 * @param componentTs - Array of class types for each component.
-	 * @param argsArray -  Array of array of arguments (VarArgs) for each component <code>C</code> constructor. Where
-	 * nested array is simple <code>args</code>.
+	 * @param args - A sequence of arrays with the passed component arguments of each <code>C</code> constructor, in the same order as
+	 * the type transfer. 
 	 * 
+	 * @retruns The Object[] array represent components with different type witch user emplaced.
+	 *
 	 * @throws JECSException If entity not valid or <code>null</code>.
 	 * @throws JECSUndifiendBehaviourError If conflict between the <code>args</code> and <code>C</code> constructor
 	 * arguments.
 	 */
 	@SuppressWarnings("unchecked")
-	@JECSApi(since = "0.1.1", funcDesc = "emplace array of c-args")
+	@JECSApi(since = "0.1.1, last = 0.1.7", funcDesc = "emplace array of c-args")
 	public final <E extends Number, C extends Component> Component[] emplace(E entity, Class<?>[] componentTs,
-			Object[]... argsArray) throws JECSException
-	{
+			Object[]... args) throws JECSException {
 		Component[] components = null;
-		//args is normal array of arguments for each componentTs.
-		for(int args = 0; args < componentTs.length; args++)
-		{
-			if(components == null) components = (Component[]) new Object[componentTs.length];
+		// Args is normal array of arguments for each component type.
+		for(int i = 0; i < componentTs.length; i++) {
+			if(components == null) 
+				components = (Component[]) new Object[componentTs.length];
 			
-			//convert argsArray to single array for each args.
-			Object[] argss = (Object[]) argsArray[0][args];
-			components[args] = emplace(entity, (Class<? extends C> )componentTs[args], argss);
+			// Convert args array of arrays to single args[i] array for each component type.
+			components[i] = emplace(entity, (Class<C>)componentTs[i], args[i]);
 		}
 		return components;
+	}
+	
+	/**
+	 * Replaces <code>entity</code> with component only if this entity already exist in the container of entities. If 
+	 * previusly entity with identiefier <code>entity</code> has component with this type it will be 
+	 * replaced with new <code>componentT</code> and its <code>args</code> to sequence, and old component data
+	 * returns.
+	 * <p>
+	 * If this entity doesnt exitst in container this method does nothing.
+	 * <p>
+	 * If component constructor doesn't apply zero arguments pass {@link NULL}. If user pass {@link NULL} and
+	 * component won't have constructor with zero arguments its crash.
+	 * 
+	 * @param args - Arguments of component <code>C</code> constructor.
+	 * @param entity - The entity whose components will be reassembled.
+	 * @param <E> Entity type
+	 * @param <C> Component Type
+	 * @return The replaced instance of that component.
+	 */
+	@JECSApi(since = "0.1.2, last = 0.1.7")
+	public <E extends Number, C extends Component> C replace(E entity, Class<C> componentT, 
+			Object... args) throws JECSException {
+		try {
+			if(contains(entity)) {
+				ComponentSequence<Component> components = container.get(entity);
+				C oldComponent = get(entity, componentT);
+				C replacedComponent = (C) constructFromArgs(componentT, args);
+				int replacedIdx = components.indexOf(oldComponent);
+				
+				components.remove(replacedIdx);
+				components.add(replacedIdx, replacedComponent);
+				return oldComponent;
+			}
+		} catch (NoSuchMethodException | SecurityException | ClassNotFoundException | 
+				InstantiationException | IllegalAccessException | IllegalArgumentException |
+				InvocationTargetException e) { e.printStackTrace(); };
+		return null;
 	}
 	
 	/**
@@ -1115,31 +1276,21 @@ public class JECS<Component extends Object> implements Runnable
 	 * @param entity - The entity whose components will be reassembled.
 	 * @param <E> Entity type
 	 * @param <C> Component Type
+	 * @return The replaced instance of that component.
 	 */
-	@JECSApi(since = "0.1.2")
-	public <E extends Number, C extends Component> C replace(E entity, Class<C> componentT, 
-			Object... args) throws JECSException
-	{
-		try 
-		{
-			if(contains(entity))
-			{
-				ComponentSequence<Component> newComponents = new ComponentSequenceImpl<Component>();
-				C component = (C) fromArgs(entity, componentT, args);
-				newComponents.emplace(component); //means place component
+	@JECSApi(since = "0.1.7")
+	public <E extends Number, C extends Component> C replace(E entity, C component) throws JECSException {
+		try {
+			if(contains(entity)) {
+				ComponentSequence<Component> components = container.get(entity);
+				C oldComponent = get(entity, component.getClass());
+				int replacedIdx = components.indexOf(oldComponent);
 				
-				ComponentSequence<Component> prevComponents = container.replace((Integer) entity, newComponents);
-				if(prevComponents != null && !prevComponents.isEmpty())
-				{
-					for(int i = 0; i < prevComponents.size(); i++)
-						nullptr(prevComponents.get(i));
-					prevComponents = null;
-				}
-				return (C) component;
+				components.remove(replacedIdx);
+				components.add(replacedIdx, component);
+				return oldComponent;
 			}
-		} catch (NoSuchMethodException | SecurityException | ClassNotFoundException | 
-				InstantiationException | IllegalAccessException | IllegalArgumentException |
-				InvocationTargetException e) { e.printStackTrace(); };
+		} catch ( SecurityException | IllegalArgumentException e) { e.printStackTrace(); };
 		return null;
 	}
 	
@@ -1159,41 +1310,21 @@ public class JECS<Component extends Object> implements Runnable
 	@SuppressWarnings("unchecked")
 	@JECSApi(since = "0.1.2")
 	public <E extends Number, C extends Component> Component[] replace(E entity, Class<?>[] componentTs, 
-			Object[]... arrayArgs) throws JECSException
-	{
-		try 
-		{
-			if(contains(entity))
-			{
+			Object[]... arrayArgs) throws JECSException {
+		try {
+			if(contains(entity)) {
 				Component[] components = null;
-				//args is normal array of arguments for each componentTs.
-				for(int args = 0; args < componentTs.length; args++)
-				{
-					//convert argsArray to single array for each args.
-					Object[] argss = (Object[]) arrayArgs[0][args];
-					
-					//replace ==============
-					if(components == null)
+				// Args is normal array of arguments for each componentTs.
+				for(int i = 0; i < componentTs.length; i++) {
+					if(components == null) 
 						components = (Component[]) new Object[componentTs.length];
 					
-					Component component = (C) fromArgs(entity, (Class<? extends C>) componentTs[args], argss);
-					components[args] = component; //means place component
-					
-					ComponentSequence<Component> prevComponents = container.replace((Integer) entity, 
-							new ComponentSequenceImpl<Component>(Arrays.asList(components)));
-					if(prevComponents != null && !prevComponents.isEmpty())
-					{
-						for(int i = 0; i < prevComponents.size(); i++)
-							nullptr(prevComponents.get(i));
-						prevComponents = null;
-					}
-					//======================	
+					// Convert argsArray to single array for each args.
+					components[i] = replace(entity, (Class<C>)componentTs[i], arrayArgs[i]);
 				}
 				return components;
 			}
-		} catch (NoSuchMethodException | SecurityException | ClassNotFoundException | 
-				InstantiationException | IllegalAccessException | IllegalArgumentException |
-				InvocationTargetException e) { e.printStackTrace(); };
+		} catch (SecurityException | IllegalArgumentException  e) { e.printStackTrace(); };
 		return null;
 	}
 	
@@ -1204,14 +1335,14 @@ public class JECS<Component extends Object> implements Runnable
 	 * entity with identiefier <code>entity</code> has component it will be discarded and replaced.
 	 * 
 	 * <p> Its identical to this code snipped:
-	 * <blockquote><pre>
+	 * <pre>
 	 * if(contains(entity)
 	 * 	replace(entity, componentT, args...)
 	 * else {
 	 * 	insert(entity.intValue(), size() - 1);
 	 * 	emplace(entity, componentT, args...)
 	 * }
-	 * </blockquote></pre>
+	 * </pre>
 	 * @param args - Arguments (VarArgs) of component <code>C</code> constructor.
 	 * @param entity - The entity whose components will be replaced or emplaced.
 	 * @param componentT - Class type of component.
@@ -1220,10 +1351,8 @@ public class JECS<Component extends Object> implements Runnable
 	 */
 	@JECSApi(since = "0.1.2")
 	public <E extends Number, C extends Component> void replaceOrEmplace(E entity, Class<C> componentT,
-			Object... args)
-	{
-		try
-		{
+			Object... args) {
+		try {
 			if(contains(entity))
 				replace(entity, componentT, args);
 		    else { 
@@ -1241,14 +1370,14 @@ public class JECS<Component extends Object> implements Runnable
 	 * with empty component sequence.
 	 * 
 	 * <p> Its identical to this code snipped:
-	 * <blockquote><pre>
+	 * <pre>
 	 * if(contains(entity)
 	 * 	replace(entity, componentTs, arrayArgs...)
 	 * else {
 	 * 	insert(entity.intValue(), size() - 1);
 	 * 	emplace(entity, componentTs, arrayArgs...)
 	 * }
-	 * </blockquote></pre>
+	 * </pre>
 	 * @param arrayArgs - Array of arguments (VarArgs) of component <code>C</code> constructor.
 	 * @param entity - The entity whose components will be replaced or emplaced.
 	 * @param componentTs - Array of class types for each component.
@@ -1257,10 +1386,8 @@ public class JECS<Component extends Object> implements Runnable
 	 */
 	@JECSApi(since = "0.1.2")
 	public <E extends Number, C extends Component> void replaceOrEmplace(E entity, Class<?>[] componentTs,
-			Object[]... argsArray)
-	{
-		try
-		{
+			Object[]... argsArray) {
+		try {
 			if(contains(entity))
 				replace(entity, componentTs, argsArray);
 		    else { 
@@ -1280,21 +1407,22 @@ public class JECS<Component extends Object> implements Runnable
 	 * @param entity - The entity identifier that the component will be attached to.
 	 * @param componentT - Class type of component.
 	 * 
+	 * @return The erased component instance.
 	 * @throws JECSException If entity not valid.
 	 */
 	@JECSApi(since = "0.1.0")
-	public final <E extends Number, C extends Component> void erase(E entity, Class<C> componentT)
-			throws JECSException
-	{
+	public final <E extends Number, C extends Component> Component erase(E entity, Class<C> componentT)
+			throws JECSException {
 		validationCheck(entity, "erase component from");
 		
 		if(!has(entity, componentT))
 			throw new JECSException("Cannot to remove non-existing component!");
 		
 		ComponentSequence<Component> components = container.get(entity);
-		C component = get(entity, componentT);
+		C component = get(entity, componentT), componentInst = null;
+		componentInst = component;
 		components.erase(component);
-		component = null;
+		return componentInst;
 	}
 	
 	/**
@@ -1307,28 +1435,27 @@ public class JECS<Component extends Object> implements Runnable
 	 * @param entity - The entity identifier that the component will be attached to.
 	 * @param componentTs - Class type of component(s).
 	 * 
+	 * @return The erased components array.
+	 * 
 	 * @throws JECSException If entity not valid.
 	 */
 	@SafeVarargs
 	@JECSApi(since = "0.1.0")
-	public final <E extends Number, C extends Component> void erase(E entity, Class<? extends C>... componentTs)
-			throws JECSException
-	{
+	public final <E extends Number, C extends Component> List<Component> erase(E entity, Class<? extends C>... componentTs)
+			throws JECSException {
+		List<Component> componentInst = new ArrayList<Component>();
 		for(int i = 0; i < componentTs.length; i++)
-		{
-			Class<? extends C> componentT = (Class<? extends C>) componentTs[i]; 
-			erase(entity, componentT);
-		}
-			
+			componentInst.add(erase(entity, (Class<? extends C>) componentTs[i]));
+		return componentInst;
 	}
 	
 	/**
 	 * See {@link #erase(Number, Class)}. 
 	 */
 	@JECSApi(since = "0.1.2")
-	public final <E extends Number, C extends Component> void remove(E entity, Class<C> componentT)
+	public final <E extends Number, C extends Component> Component remove(E entity, Class<C> componentT)
 			throws JECSException {
-		erase(entity, componentT);
+		return erase(entity, componentT);
 	}
 	
 	/**
@@ -1336,9 +1463,9 @@ public class JECS<Component extends Object> implements Runnable
 	 */
 	@SafeVarargs
 	@JECSApi(since = "0.1.2")
-	public final <E extends Number, C extends Component> void remove(E entity, Class<? extends C>... componentTs)
+	public final <E extends Number, C extends Component> List<Component> remove(E entity, Class<? extends C>... componentTs)
 			throws JECSException {
-		erase(entity, componentTs);
+		return erase(entity, componentTs);
 	}
 	
 	/**
@@ -1349,11 +1476,9 @@ public class JECS<Component extends Object> implements Runnable
 	 * @param <C> Component type.
 	 */
 	@JECSApi(since = "0.1.2")
-	public <E extends Number, C extends Component> void removeAll(E entity)
-	{
+	public <E extends Number, C extends Component> void removeAll(E entity) {
 		ComponentSequence<Component> components = container.get(entity);
-		while(!components.isEmpty())
-		{
+		while(!components.isEmpty()) {
 			@SuppressWarnings("unchecked")
 			Class<? extends Component> componentT = (Class<? extends Component>) components.get(0).getClass();
 			try {
@@ -1380,13 +1505,10 @@ public class JECS<Component extends Object> implements Runnable
      */
 	@JECSApi(since = "0.1.2")
 	public <E extends Number, C extends Component> void removeIfExist(E entity, Class<?>... componentTs) 
-			throws JECSException
-	{
+			throws JECSException {
 		validationCheck(entity, "remove from");
-		if(container.containsKey(entity))
-		{			
-			for(int i = 0; i < componentTs.length; i++)
-			{
+		if(container.containsKey(entity)) {			
+			for(int i = 0; i < componentTs.length; i++) {
 				@SuppressWarnings("unchecked")
 				Class<? extends C> componentT = (Class<? extends C>) componentTs[i]; 
 				container.get(entity).erase(get(entity, componentT));
@@ -1413,10 +1535,8 @@ public class JECS<Component extends Object> implements Runnable
 	 */
 	@JECSApi(since = "0.1.3", funcDesc = "invoke")
 	public synchronized <E extends Number, C extends Component> void invoke(E entity, Class<C> componentT, String funcName,
-			Object... funcArgs) throws JECSException
-	{		
-		try 
-		{
+			Object... funcArgs) throws JECSException {		
+		try  {
 			Class<?>[] funcArgsTypes = new Class<?>[funcArgs.length]; 
 			for(int t = 0; t < funcArgs.length; t++) 
 				funcArgsTypes[t] = sortR(funcArgs[t].getClass().getTypeName(), funcArgs[t].getClass());
@@ -1485,16 +1605,13 @@ public class JECS<Component extends Object> implements Runnable
 	@SuppressWarnings("unchecked")
 	@JECSApi(since = "0.1.4", funcDesc = "invoke for each if subclass")
 	public synchronized <E extends Number, C extends Component> void invokeEach(E entity, Class<C> componentT, String funcName,
-			Object... funcArgs) throws JECSException
-	{
+			Object... funcArgs) throws JECSException {
 		try(org.lwjgl.system.MemoryStack stack = stackPush()) {
-			try 
-			{
+			try {
 				Class<?>[] invokers = null;
 				IntBuffer invokersCount = stack.callocInt(1);
-				//for each checks if comp subclass of componentT.
-				for(int i = 0; i < container.get(entity).size(); i++)
-				{
+				// For each checks if comp subclass of componentT.
+				for(int i = 0; i < container.get(entity).size(); i++) {
 					if(invokers == null) {
 						invokers = new Class<?>[container.get(entity).size()];
 					}
@@ -1520,8 +1637,7 @@ public class JECS<Component extends Object> implements Runnable
 	 * @param b - Class that is being compared.
 	 */
 	@JECSApi(since = "0.1.5", funcDesc = "class with class")
-	public boolean eqs(Class<?> a, Class<?> b)
-	{
+	public boolean eqs(Class<?> a, Class<?> b) {
 		return a == b ? true : false;
 	}
 	
@@ -1533,8 +1649,7 @@ public class JECS<Component extends Object> implements Runnable
 	 * @param b - Class that is being compared.
 	 */
 	@JECSApi(since = "0.1.5", funcDesc = "object with class")
-	public boolean eqs(Object a, Class<?> b)
-	{
+	public boolean eqs(Object a, Class<?> b) {
 		return a.getClass() == b ? true : false;
 	}
 	
@@ -1546,8 +1661,7 @@ public class JECS<Component extends Object> implements Runnable
 	 * @param b - Class-object that is being compared.
 	 */
 	@JECSApi(since = "0.1.5", funcDesc = "class with object")
-	public boolean eqs(Class<?> a, Object b)
-	{
+	public boolean eqs(Class<?> a, Object b) {
 		return a == b.getClass() ? true : false;
 	}
 	
@@ -1559,19 +1673,17 @@ public class JECS<Component extends Object> implements Runnable
 	 * @param b - Class-object that is being compared.
 	 */
 	@JECSApi(since = "0.1.5", funcDesc = "object with object")
-	public boolean eqs(Object a, Object b)
-	{
+	public boolean eqs(Object a, Object b) {
 		return a.getClass() == b.getClass() ? true : false;
 	}
 	
-	/*
-	 * 
+	/**
+	 * Cast the <code>in</code> class to <code>from</code> class with type C without exceptions.
 	 */
 	@SuppressWarnings("unchecked")
 	@BetaFeature
 	@JECSApi(since = "0.1.5", funcDesc = "save cast")
-	public <C extends Component> C cast(Class<?> in, Object from)
-	{
+	public <C extends Component> C cast(Class<C> in, Object from) {
 		if(eqs(in, from))
 			return ((C) from);
 		return null;	
@@ -1591,12 +1703,12 @@ public class JECS<Component extends Object> implements Runnable
 	 * {@link EachI#invoke(int, Object)} implementation function.
 	 * <p>
 	 * Example:
-	 * <blockquote><pre>
+	 * <pre>
 	 * system.each(ComponentBase.class, (entity, component) ->
 	 * {
 	 *       component.printName();
 	 * });
-	 * </blockquote></pre>
+	 * </pre>
 	 * 
 	 * @param <E> Entity type.
 	 * @param <C> Component type.
@@ -1605,16 +1717,13 @@ public class JECS<Component extends Object> implements Runnable
 	 */
 	@JECSApi(since = "0.1.5", funcDesc = "each for all entities with c & sub-c")
 	public synchronized <E extends Number, C extends Component> void each(Class<C> componentT, EachI<C> funcImpl) 
-			throws JECSException
-	{
+			throws JECSException {
 		Each<C> eachFuncImpl = Each.create(funcImpl);
 		Iterator<Integer> itr = entities.iterator();
 		
-		while(itr.hasNext())
-		{
+		while(itr.hasNext()) {
 			int entity = itr.next();
-			for(int componentIndex = 0; componentIndex < size(entity); componentIndex++)
-			{
+			for(int componentIndex = 0; componentIndex < size(entity); componentIndex++) {
 				C component = safeAsSubClass(container.get(entity).get(componentIndex).getClass(), componentT, "", false) != null 
 					? get(entity, container.get(entity).get(componentIndex).getClass()) 
 					: null;
@@ -1632,7 +1741,7 @@ public class JECS<Component extends Object> implements Runnable
 	 * component, you must first check that this type of component exists at all and then cast to specific type to invoke content. 
 	 * <p>
 	 * Basic example:
-	 * <blockquote><pre>
+	 * <pre>
 	 *  ... //body of functional interface
 	 * 
 	 *  if(system.eqs(ComponentAny.class, component))
@@ -1640,7 +1749,7 @@ public class JECS<Component extends Object> implements Runnable
 	 *
 	 *  ...
 	 * 
-	 * </blockquote></pre>
+	 * </pre>
 	 * More detail about <code>EachI</code> see in {@link EachCI#invoke(int, Object)}.
 	 * <p>
 	 * This method is usually the best and fastest choise, and very effective than {@link #invokeEach(Number, Class, String, Object...)}
@@ -1651,14 +1760,14 @@ public class JECS<Component extends Object> implements Runnable
 	 * {@link EachI#invoke(int, Object)} implementation function, but slighty slow than {@link #each(Class, EachI)} for fully justified reasons.
 	 * <p>
 	 * Example:
-	 * <blockquote><pre>
+	 * <pre>
 	 * system.each((entity, anyComponent) ->
      * {
      *      if(system.eqs(ComponentAny.class, anyComponent))
      *           ((ComponentAny) anyComponent).printObj(toString());
      * });
      *
-	 * </blockquote></pre>
+	 * </pre>
 	 * @param <E> Entity type.
 	 * @param <C> Component type.
 	 * @param componentT - Component as super-component.
@@ -1692,10 +1801,10 @@ public class JECS<Component extends Object> implements Runnable
 	 * {@link JECSException}.
 	 * 
 	 * <p>Example:<p>
-	 * <blockquote><pre> 
+	 * <pre> 
 	 * if(has(Component.class) && has(Component2.class)) 
 	 * 	System.out.println("Types contains in container!");
-	 * </blockquote></pre>
+	 * </pre>
 	 * 
 	 * @param <E> Type of entity.
 	 * @param <C> Type of component.
@@ -1708,8 +1817,7 @@ public class JECS<Component extends Object> implements Runnable
 	 */
 	@JECSApi(since = "0.1.0")
 	public <E extends Number, C extends Component> boolean has(E entity, Class<C> componentT) 
-			throws JECSException 
-	{
+			throws JECSException {
 		validationCheck(entity, "check on has component from");
 		
 		ComponentSequence<Component> components = container.get(entity);
@@ -1717,10 +1825,8 @@ public class JECS<Component extends Object> implements Runnable
 		String objectTypeName = "";
 		
 		int searchedKey = components.isEmpty() ? 0 : components.size();
-		for(int i = 0; i < searchedKey; i++)
-		{
-			if(components.get(i) == null)
-			{
+		for(int i = 0; i < searchedKey; i++) {
+			if(components.get(i) == null) {
 				if(i == searchedKey)
 					return false;
 				continue;
@@ -1741,10 +1847,10 @@ public class JECS<Component extends Object> implements Runnable
 	 * {@link JECSException}.
 	 * 
 	 * <p>Example:<p>
-	 * <blockquote><pre> 
+	 * <pre> 
 	 * if(has(Component.class, Component2.class, Component3.class)) 
 	 * 	System.out.println("Types contains in container!");
-	 * </blockquote></pre>
+	 * </pre>
 	 * 
 	 * @param <E> Type of entity.
 	 * @param <C> Type of component.
@@ -1758,8 +1864,7 @@ public class JECS<Component extends Object> implements Runnable
 	@SafeVarargs
 	@JECSApi(since = "0.1.0")
 	public final <E extends Number, C extends Component> boolean has(E entity, Class<? extends C>... componentTs) 
-			throws JECSException 
-	{
+			throws JECSException {
 		int similarities = 0;
 		for(int i = 0; i < componentTs.length; i++)
 			if(has(entity, (Class<? extends C>) componentTs[i]))
@@ -1793,8 +1898,7 @@ public class JECS<Component extends Object> implements Runnable
 	@SafeVarargs
 	@JECSApi(since = "0.1.3")
 	public final <E extends Number, C extends Component> boolean any(E entity, Class<? extends C>... componentTs) 
-			throws JECSException 
-	{
+			throws JECSException {
 		for(int i = 0; i < componentTs.length; i++)
 			if(has(entity, (Class<? extends C>) componentTs[i])) 
 				return true;
@@ -1852,21 +1956,19 @@ public class JECS<Component extends Object> implements Runnable
 	@SuppressWarnings("unchecked")
 	@JECSApi(since = "0.1.2")
 	public <E extends Number, C extends Component> C get(E entity, Class<?> componentT) 
-			throws JECSException 
-	{
+			throws JECSException {
 		validationCheck(entity, "check on has component from");
 
 		ComponentSequence<Component> components = container.get(entity);
-		for(int i = 0; i < components.size(); i++)
-		{
-			if(components.get(i) == null)
-			{
+		for(int i = 0; i < components.size(); i++) {
+			Component component = components.get(i);
+			if(component == null) {
 				if(i != components.size()) 
 					continue;
 				else break;
 			} else {
-				if(components.get(i).getClass().getName().equals(componentT.getName()))
-					//this is absolutly safty cast bc we cast Object to T (i.e Object is parent for T)
+				if(component.getClass().getName().equals(componentT.getName()))
+					// This is absolutly safty cast bc we cast Object to T (i.e Object is parent for T)
 					return ((C) container.get(entity).get(i));
 			}
 		}
@@ -1881,8 +1983,7 @@ public class JECS<Component extends Object> implements Runnable
 	 */
 	@BetaFeature
 	@JECSApi(since = "0.1.5")
-	private <E extends Number> Object getObject(E entity, int index) 
-	{
+	private <E extends Number> Object getObject(E entity, int index) {
 		validationCheck(entity, "check on has component from");
 
 		ComponentSequence<Component> components = container.get(entity);
@@ -1908,21 +2009,18 @@ public class JECS<Component extends Object> implements Runnable
 	@BetaFeature
 	@JECSApi(since = "0.1.5")
 	public <E extends Number, C extends Component> C getIfExist(E entity, Class<C> componentT) 
-			throws JECSException 
-	{
+			throws JECSException {
 		validationCheck(entity, "check on has component from");
 
 		ComponentSequence<Component> components = container.get(entity);
-		for(int i = 0; i < components.size(); i++)
-		{
-			if(components.get(i) == null)
-			{
+		for(int i = 0; i < components.size(); i++) {
+			if(components.get(i) == null) {
 				if(i != components.size()) 
 					continue;
 				else break;
 			} else {
 				if(components.get(i).getClass().getName().equals(componentT.getName()))
-					//this is absolutly safty cast bc we cast Object to T (i.e Object is parent for T)
+					// This is absolutly safty cast bc we cast Object to T (i.e Object is parent for T)
 					return ((C) container.get(entity).get(i));
 			}
 		}
@@ -1933,9 +2031,9 @@ public class JECS<Component extends Object> implements Runnable
 	 * Get's the component <code>C</code> from class type of that component is it exist, but
 	 * if this component doesn't exist that it will be automatically contruct by args.
 	 * <p>Code snippet for:
-	 * <blockquote><pre> 
+	 * <pre> 
 	 * var component = system.has(entity, componentT) ? system.get(entity, componentT) : system.emplace(entity, componentT, args);
-	 * </blockquote></pre>
+	 * </pre>
 	 * 
 	 * @param <E> Type of entity. 
 	 * @param <C> Type of component.
@@ -1947,8 +2045,7 @@ public class JECS<Component extends Object> implements Runnable
 	 */
 	@JECSApi(since = "0.1.3")
 	public <E extends Number, C extends Component> C getOrEmplace(E entity, Class<C> componentT,
-			Object... args) throws JECSException 
-	{
+			Object... args) throws JECSException {
 		return has(entity, componentT) ? get(entity, componentT) : emplace(entity, componentT, args);
 	}
 
@@ -1969,11 +2066,9 @@ public class JECS<Component extends Object> implements Runnable
 	@SafeVarargs
 	@JECSApi(since = "0.1.2")
 	public final <E extends Number, C extends Component, Group extends Component> Group[] 
-			get(E entity, Class<? extends C>... componentTs) throws JECSException 
-	{
+			get(E entity, Class<? extends C>... componentTs) throws JECSException {
 		final List<Group> group = new ArrayList<Group>();
-		for(int i = 0; i < componentTs.length; i++)
-		{
+		for(int i = 0; i < componentTs.length; i++) {
 			Class<? extends C> componentT = (Class<? extends C>)componentTs[i]; 
 			Component component = get(entity, componentT);
 			if(component != null)
@@ -1998,8 +2093,7 @@ public class JECS<Component extends Object> implements Runnable
 	 */
 	@JECSApi(since = "0.1.4")
 	public <E extends Number, C extends Component> C getIfFamily(E entity, Class<? extends Component> parentComponentT, 
-			Class<C> childComponentT) throws JECSException
-	{
+			Class<C> childComponentT) throws JECSException {
 		return safeAsSubClass(childComponentT, parentComponentT, "", false) != null ? get(entity, childComponentT) : null;
 	}
 	
@@ -2023,19 +2117,17 @@ public class JECS<Component extends Object> implements Runnable
 	 */
 	@SafeVarargs
 	@JECSApi(since = "0.1.4")
-	public final <E extends Number, C extends Component> void createPack(E entity, Class<? extends Component>... componentTs)
-	{
-		for(int i = 0; i < packs.size(); i++)
-		{
-			if(packs.get(i) == null)
-				packs.put(i, new ComponentSequenceImpl<Component>());
-			
-			if(packs.get(i).isEmpty())
-			{
+	public final <E extends Number, C extends Component> void createPack(E entity, Class<? extends Component>... componentTs) {
+		for(int i = 0; i < packs.size(); i++) {
+			ComponentSequence<Component> sequence = packs.get(i); 
+			if(sequence == null)
+				sequence = packs.put(i, new ComponentSequenceImpl<Component>());
+				
+			if(sequence.isEmpty()) {
 				try {
 					Component[] component = get(entity, componentTs);
 					for(int c = 0; c < component.length; c++)
-						packs.get(i).add(component[c]); 
+						sequence.add(component[c]); 
 					return;
 				} catch (JECSException e) { e.printStackTrace(); }	
 			}
@@ -2062,8 +2154,7 @@ public class JECS<Component extends Object> implements Runnable
 	@SuppressWarnings("unchecked")
 	@JECSApi(since = "0.1.4")
 	public final <E extends Number, C extends Component> Component[] pack(E entity, int index) 
-			throws JECSException
-	{
+			throws JECSException {
 		validationCheck(entity, "get pack of components from");
 		
 		for(int i = 0; i < packs.get(index).size(); i++)
@@ -2083,11 +2174,11 @@ public class JECS<Component extends Object> implements Runnable
 	 * <p>
 	 * If you don wan't to use the packs, you also can achive the same result follow this code
 	 * snippet below:
-	 * <blockquote><pre>
+	 * <pre>
 	 * Object[] components = system.get(entity, Script1.class, Script2.class);
 	 *     for(Object component : components)
 	 *        ((ScriptComponent)component).func();
-	 * </blockquote></pre>
+	 * </pre>
 	 * where <code>Script1</code> and <code>Script2</code> extends from <code>ScriptComponent</code>.
 	 * <p>
 	 * <b>Pack</b> is a specific set or group, where you can store components of entity. Pack should be 
@@ -2101,13 +2192,13 @@ public class JECS<Component extends Object> implements Runnable
 	 * iterate over components, you must specify the exact entity that the pack was originally created from.
 	 * <p>
 	 * Example:
-	 * <blockquote><pre>
+	 * <pre>
 	 * system.createPack(entity, Component1.class, Component2.class, ...); //pack creation
 	 * var pack = system.pack(entity, 0); //get the pack
 	 * 
 	 * while(true)
 	 *     system.invokeEachPack(pack, "func"); //invoke functions from each compoennt
-	 * </blockquote></pre>
+	 * </pre>
 	 * <p>
 	 * @param <Pack> Pack of Component types.
 	 * @param pack - Pack of component or basically array.
@@ -2117,17 +2208,14 @@ public class JECS<Component extends Object> implements Runnable
 	 */
 	@JECSApi(since = "0.1.4")
 	@SafeVarargs
-	public final synchronized <Pack extends Component> void invokeEachPack(Pack[] pack, String funcName, Object... funcArgs)
-	{	
-		for(int i = 0; i < pack.length; i++)
-		{
-			try 
-			{
+	public final synchronized <Pack extends Component> void invokeEachPack(Pack[] pack, String funcName, Object... funcArgs) {	
+		for(int i = 0; i < pack.length; i++) {
+			try {
 				Class<?>[] funcArgsTypes = new Class<?>[funcArgs.length]; 
 				for(int t = 0; t < funcArgs.length; t++) 
 					funcArgsTypes[t] = sortR(funcArgs[t].getClass().getTypeName(), funcArgs[t].getClass());
 					
-				//invokes the function
+				// Invokes the function
 				Method func = pack[i].getClass().getDeclaredMethod(funcName, funcArgsTypes);
 				func.invoke(pack[i], funcArgs);
 			} catch (NoSuchMethodException | SecurityException | IllegalAccessException |
@@ -2141,8 +2229,7 @@ public class JECS<Component extends Object> implements Runnable
 	 * in proper sequence. 
 	 */
 	@JECSApi(since = "0.1.5")
-	public final Iterator<Integer> iterator()
-	{
+	public final Iterator<Integer> iterator() {
 		return entities.iterator();
 	}
 	
@@ -2151,8 +2238,7 @@ public class JECS<Component extends Object> implements Runnable
 	 * in proper sequence. 
 	 */
 	@JECSApi(since = "0.1.5")
-	public final ListIterator<Integer> listIterator()
-	{
+	public final ListIterator<Integer> listIterator() {
 		return entities.listIterator();
 	}
 	
@@ -2161,8 +2247,7 @@ public class JECS<Component extends Object> implements Runnable
 	 * in proper sequence. 
 	 */
 	@JECSApi(since = "0.1.5")
-	public final ReversedIterator<Integer> reversedIterator()
-	{
+	public final ReversedIterator<Integer> reversedIterator() {
 		ReversedIterator<Integer> reverseItr = new ReversedIterator<Integer>(entities);
 		return reverseItr;
 	}
@@ -2172,8 +2257,7 @@ public class JECS<Component extends Object> implements Runnable
 	 * in proper sequence. 
 	 */
 	@JECSApi(since = "0.1.5")
-	public final ReversedIteratorList<Integer> reversedIteratorList()
-	{
+	public final ReversedIteratorList<Integer> reversedIteratorList() {
 		ReversedIteratorList<Integer> reverseListItr = new ReversedIteratorList<Integer>(entities);
 		return reverseListItr;
 	}
@@ -2182,8 +2266,7 @@ public class JECS<Component extends Object> implements Runnable
 	 * Remove all mappings from this handle map.
 	 */
 	@JECSApi(since = "0.1.1")
-	public void clear()
-	{
+	public void clear() {
 		container.clear();
 	}
 	
@@ -2191,8 +2274,7 @@ public class JECS<Component extends Object> implements Runnable
 	 * Returns true if this handle contains no entity mappings.
 	 */
 	@JECSApi(since = "0.1.1")
-	public boolean empty()
-	{
+	public boolean empty() {
 		if(container.isEntity())
 			return container.isEmpty();
 		
@@ -2205,8 +2287,7 @@ public class JECS<Component extends Object> implements Runnable
 	 * @param entity - A valid entiity.
 	 */
 	@JECSApi(since = "0.1.1")
-	public void clear(int entity) 
-	{
+	public void clear(int entity) {
 		removeAll(entity);
 		
 		if(!container.get(entity).isEmpty())
@@ -2222,8 +2303,7 @@ public class JECS<Component extends Object> implements Runnable
 	 * @return number of components in a entity.
 	 */
 	@JECSApi(since = "0.1.1")
-	public int size(int entity)
-	{
+	public int size(int entity) {
 		return container.get(entity).size();
 	}
 	
@@ -2233,8 +2313,7 @@ public class JECS<Component extends Object> implements Runnable
 	 * @return number of entities in a handle map.
 	 */
 	@JECSApi(since = "0.1.1")
-	public int size()
-	{
+	public int size() {
 		return container.size();
 	}
 	
@@ -2249,13 +2328,14 @@ public class JECS<Component extends Object> implements Runnable
 	 */
 	@JECSApi(since = "0.1.1")
 	private <E extends Number> void validationCheck(E entity, String msg) 
-			throws JECSException
-	{
-		final Integer unvalid = -1; //uses Integer instead 'int' because generic type cast.
-		@SuppressWarnings("unchecked")
-		boolean flag = (entity == null) || (entity == (E) unvalid); 
-		if(flag)
-			throw new JECSException("Cannot " + msg + " unvalid entity.");
+			throws JECSException {
+		if(!Context.ctxRelease) { // Disable validationCheck for fast / release modes.
+			final Integer unvalid = -1; //uses Integer instead 'int' because generic type cast.
+			@SuppressWarnings("unchecked")
+			boolean flag = (entity == null) || (entity == (E) unvalid); 
+			if(flag)
+				throw new JECSException("Cannot " + msg + " unvalid entity.");
+		}
 	}
 	
 	/**
@@ -2266,8 +2346,7 @@ public class JECS<Component extends Object> implements Runnable
 	 */
 	@Override
 	@JECSApi(since = "0.1.4")
-	public String toString() 
-	{
+	public String toString() {
 		return "JECSHandle [entities=" + entities + ", container=" + container + ", packs=" + packs + "]";
 	}
 	
@@ -2301,21 +2380,19 @@ public class JECS<Component extends Object> implements Runnable
 			return false;
 		@SuppressWarnings("unchecked")
 		JECS<Component> other = (JECS<Component>) obj;
+		
 		if (container == null) {
 			if (other.container != null)
 				return false;
 		} else if (!container.equals(other.container))
 			return false;
+		
 		if (entities == null) {
 			if (other.entities != null)
 				return false;
 		} else if (!entities.equals(other.entities))
 			return false;
-		//if (entts == null) {
-			//if (other.entts != null)
-				//return false;
-	//	} else if (!entts.equals(other.entts))
-			// false;
+		
 		if (packs == null) {
 			if (other.packs != null)
 				return false;
@@ -2328,15 +2405,13 @@ public class JECS<Component extends Object> implements Runnable
 	 * Return the context of this instance.
 	 */
 	@JECSApi(since = "0.1.6")
-	public Context getContext()
-	{
+	public Context getContext() {
 		return context;
 	}
 
 	@JECSApi(since = "0.1.*")
 	@Override
-	public void run() 
-	{
-		System.out.print("Hey");
+	public void run() {
+
 	}
 }

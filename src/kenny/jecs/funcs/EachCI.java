@@ -33,8 +33,7 @@ public interface EachCI<Component>
 	 * </blockquote></pre>
 	 * or using lambda
 	 * <blockquote><pre>
-	 * system.each(AnyComponent.class, (entity, anyComponent) ->
-	 * {
+	 * system.each(AnyComponent.class, (entity, anyComponent) -> {
 	 *    if(system.eqs(ComponentAny.class, anyComponent))
 	 *        ((ComponentAny) anyComponent).printObj(toString());
 	 * });

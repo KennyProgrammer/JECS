@@ -942,6 +942,12 @@ public class JECS<Component extends Object> implements Runnable
 		else if(args[0] == NULL) 
 			isNullArgs = true;
 		
+		// Inner and NULL arguments situation.
+		if(isNullArgs && isInnerClass) {
+			finalCtorArgs = new Class<?>[1];
+			finalCtorArgs[0] = enclosingClassInfo;
+		}
+		
 		// If user pass NULL constant skip hole code and invoke.
 		if(!isNullArgs) {
 			// Compare stage: The stage of checking constructors and their parameters.
@@ -1039,25 +1045,28 @@ public class JECS<Component extends Object> implements Runnable
 				
 				if(foundCtor)
 					break;
-				
+					
 				ctorIdx++;
 			}
 		} else {
 			//Constructing stage for NULL:
-			Constructor<?>[] ctors = componentT.getDeclaredConstructors();
+			Constructor<?> ctor = componentT.getDeclaredConstructors()[0];
+			ctor.setAccessible(true);
 			if(isInnerClass && !isInnerStaticClass) {
 				Object[] argss = getInnerObjects(args, finalCtorArgs, isNullArgs);
-				return (C) ctors[0].newInstance(argss);
+				return (C) ctor.newInstance(argss);
 			} else 
-				return (C) ctors[0].newInstance((Object[])null);
+				return (C) ctor.newInstance((Object[])null);
 		}
 		
 		//Constructing stage:
+		Constructor<?> ctor = componentT.getDeclaredConstructor(finalCtorArgs);
+		ctor.setAccessible(true);
 		if(isInnerClass && !isInnerStaticClass) {
 			Object[] argss = getInnerObjects(args, finalCtorArgs, isNullArgs);
-			return (C) componentT.getDeclaredConstructor(finalCtorArgs).newInstance(argss);
+			return (C) ctor.newInstance(argss);
 		} else 
-			return (C) componentT.getDeclaredConstructor(finalCtorArgs).newInstance(args);
+			return (C) ctor.newInstance(args);
 	}
 	
 	private Object[] getInnerObjects(Object[] args, Class<?>[] finalCtorArgs, boolean isNullArgs) throws InstantiationException, IllegalAccessException, 
@@ -1078,9 +1087,10 @@ public class JECS<Component extends Object> implements Runnable
 				innerCtor = Class.forName(innerClassesNames[0]).getDeclaredConstructors()[0];
 				inner = innerCtor.newInstance(inner);
 			}
+			
 		}
 		
-		//Adding the inner class to the main arguments by redefining the 'args' array.
+		// Adding the inner class to the main arguments by redefining the 'args' array.
 		Object[] argss;
 		if(!isNullArgs) {
 			argss = new Object[args.length + 1];
@@ -1091,7 +1101,6 @@ public class JECS<Component extends Object> implements Runnable
 			argss = new Object[1];
 			args[0] = inner;
 		}
-		
 		return argss;
 	}
 	
@@ -1139,7 +1148,8 @@ public class JECS<Component extends Object> implements Runnable
 	/**
 	 * Emplace <code>C</code> component with to that <code>entity</code>. Assigns the given 
 	 * component to an entity. This is advanced version of <code>emplace(E entity, Class<C> componentT, 
-	 * C component)</code>, instead of object you pass args and object create in automatically.
+	 * C component)</code>, instead of object you pass args and object create in automatically. Component can 
+	 * also be with private or protected modifiers or inner private modifiers.
 	 * <p>
 	 * This method will take all <code>args</code> arguments and use them to create a new component object. Before this,
 	 * the parameters of one of the class <code>C</code> constructors and the specified arguments will be checked for 
@@ -1153,10 +1163,10 @@ public class JECS<Component extends Object> implements Runnable
 	 * class-constant-indicator {@link NULL} to say that this constructor doesen't accept any number of arguments.
 	 * <p>
 	 * For example:
-	 * <blockquote><pre>
+	 * <pre>
 	 * 	       | entty | component type | component args |
 	 * system.emplace(entity, Component.class, "First", 0, true).
-	 * </blockquote></pre>
+	 * </pre>
 	 * <p>
 	 * If component constructor doesn't apply zero arguments pass {@link NULL}. If user pass {@link NULL} and
 	 * component won't have constructor with zero arguments its crash.
@@ -1255,7 +1265,7 @@ public class JECS<Component extends Object> implements Runnable
 	 * @param entity - The entity whose components will be reassembled.
 	 * @param <E> Entity type
 	 * @param <C> Component Type
-	 * @return The replaced instance of that component.
+	 * @return The previous instance of that component if exist, else null.
 	 */
 	@JECSApi(since = "0.1.2, last = 0.1.7")
 	public <E extends Number, C extends Component> C replace(E entity, Class<C> componentT, 
@@ -1554,6 +1564,7 @@ public class JECS<Component extends Object> implements Runnable
 				funcArgsTypes[t] = sortR(funcArgs[t].getClass().getTypeName(), funcArgs[t].getClass());
 			
 			Method func = componentT.getMethod(funcName, funcArgsTypes);
+			func.setAccessible(true);
 			func.invoke(get(entity, componentT), funcArgs);
 			
 		} catch (NoSuchMethodException | SecurityException | IllegalAccessException |

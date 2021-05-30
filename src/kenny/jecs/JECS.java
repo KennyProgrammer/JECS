@@ -90,7 +90,7 @@ import kenny.jecs.funcs.EachI;
  * 
  * TODO: Add multithreading support + bug fixes.
  */
-@JECS.JECSApi(since =  "0.1.7")
+@JECS.JECSApi(since =  "0.1.8")
 public class JECS<Component extends Object> implements Runnable
 {	 
 	/**
@@ -339,10 +339,72 @@ public class JECS<Component extends Object> implements Runnable
 		NULL = new NULL();
 	}
 	
+	/**
+	 * Represents a null enttiy identifier. This means that as long as the entity is null, we cannot 
+	 * delete, add, or edit its components. This is still a beta concept of null entity and will still 
+	 * look for its application in the future. 
+	 * <p>
+	 * Every time you create an entity or make it null, its identifier will change, and it will be re-created 
+	 * with the same components. This class is able to determine this type of entity by a special mask that is added to 
+	 * the beginning of the identifier of each entity.
+	 * <p>
+	 * I also want to note that you should not confuse the usual null keyword with this type of entity
+	 * as these are different implementations.
+	 */
+	@JECSApi(since = "0.1.8", funcDesc = "null entity")
+	static final class NULL_ENTITY {
+		static final int mask = 0x0;
+		
+		public static Integer nullEntity(Integer entity) {
+			String conversion = "-" + entity;
+			Integer null_entity = null;
+			if(!isNullEntity(entity)) {
+				null_entity = Integer.parseInt(conversion);
+				null_entity = replace(entity, null_entity);
+			} else {
+				throw new JECSException("This is already null entity.");
+			}
+			return null_entity;
+		}
+		
+		public static Integer entity(Integer null_entity) {
+			String conversion = "" + null_entity;
+			Integer entity = null;
+			if(isNullEntity(null_entity)) {
+				entity = Integer.parseInt(conversion.substring(1));
+				entity = replace(null_entity, entity);
+			} else {
+				throw new JECSException("This is not null entity to make it normal.");
+			}
+
+			return entity;
+		}
+		
+		public static boolean isNullEntity(Integer entity) {
+			String conversion = "" + entity;
+			if(conversion.startsWith("-") && conversion.length() > 1) {
+				return true;
+			}
+			return false;
+		}
+		
+		static Integer replace(Integer o, Integer n) {
+			JECS.instnace.destroy(o);
+			JECS.instnace.insert(n, entityCount++);
+			return n;
+		}
+	}
+	/** NULL_ENTITY constant. See {@link NULL_ENTITY}. */ 
+	public static final JECS.NULL_ENTITY NULL_ENTITY; 
+	static {
+		NULL_ENTITY = new NULL_ENTITY();
+	}
+	
 	//=========================================
 	//			JECSHandle Class
 	//=========================================
 	
+	static JECS<?> instnace;
 	/**Global statistic thing to calculate how many entities were created.*/
 	static int entityCount = -1;
 	/**This is random entity generator.*/
@@ -354,8 +416,6 @@ public class JECS<Component extends Object> implements Runnable
 	private static final String baseMsg = "Cannot construct component from args.\n" + TAB + "[DETAIL DESCRIPTION]:\n";
 	/**Array of entities for searching to find component of that entity.*/
 	private volatile ArrayList<Integer> entities;
-	/**Array of entities for searching to find component of that entity.*/
-	//private volatile SortedMap<Integer, Integer> entts;
 	/**Container of entity identifiers and sequence of all components identifiers and his data.*/
 	private volatile EntityContainer<Integer, ComponentSequence<Component>> container;
 	/**Packs of components to store and for better iteration time.*/
@@ -526,6 +586,8 @@ public class JECS<Component extends Object> implements Runnable
 			if(!container.isEmpty())
 				this.clear();
 		}
+		
+		instnace = this;
 	}
 	
 	@JECSApi(since = "0.1.7")
@@ -631,10 +693,12 @@ public class JECS<Component extends Object> implements Runnable
 	 * <p>
 	 * This create accept in parameter {@link CreateI} to send information about entity creation.
 	 * <p>
+	 * {@link Create} are invoked **after** the object has been assigned to the entity.
+	 * <p>
 	 * Example:
-	 * <blockquote><pre>
+	 * <pre>
 	 * var entity = system.create((entity)->{System.out.println("Entity " + entity + " created!")});
-	 * </blockquote></pre>
+	 * </pre>
 	 * 
 	 * @param func {@link CreateI} func implementation.
 	 * 
@@ -645,11 +709,12 @@ public class JECS<Component extends Object> implements Runnable
 		try(org.lwjgl.system.MemoryStack s = stackPush()) {
 			IntBuffer pEntity = s.mallocInt(1);
 			pEntity.put(0, create0());
+			
+			// Insert entity id and count in global order.
+			int entity = insert(pEntity.get(0), entityCount++);
 			Create funcImpl = Create.create(func);
 			funcImpl.invoke(pEntity.get(0));
-				
-			// Insert entity id and count in global order.
-			return insert(pEntity.get(0), entityCount++); 
+			return entity;
 		}
 	}
 	
@@ -741,10 +806,12 @@ public class JECS<Component extends Object> implements Runnable
 	 * 
 	 * This destroy accept in parameter {@link DestroyI} to send information about entity destruction.
 	 * <p>
+	 * {@link DestroyI} are invoked **after** the object has been erased from the entity.
+	 * <p>
 	 * Example:
-	 * <blockquote><pre>
+	 * <pre>
 	 * system.destroy(entity, (entity)->{System.out.println("Entity " + entity + " has been destroyed!")});
-	 * </blockquote></pre>
+	 * </pre>
 	 * 
 	 * @param func {@link DestroyI} func implementation.
 	 * @param <E> Entity type.
@@ -756,10 +823,10 @@ public class JECS<Component extends Object> implements Runnable
 	@JECSApi(since = "0.1.5")
 	public final <E extends Number> E destroy(E entity, DestroyI func)  
 			throws JECSException {
+		E removedEntity = destroy(entity);
 		Destroy funcImpl = Destroy.create(func);
 		funcImpl.invoke(entity.intValue());
-		
-		return destroy(entity);
+		return removedEntity;
 	}
 	
 	/**
@@ -1250,6 +1317,14 @@ public class JECS<Component extends Object> implements Runnable
 		return components;
 	}
 	
+	@SuppressWarnings("unchecked")
+	@JECSApi(since = "0.1.8", funcDesc = "emplace ComponentSequence")
+	public final <E extends Number> void emplaceEmptySequence(E entity, final ComponentSequence<?> components) {
+		if(container.get(entity) == null || container.get(entity).isEmpty()) {
+			container.put((Integer) entity, (ComponentSequence<Component>) components);
+		}
+	}
+	
 	/**
 	 * Replaces <code>entity</code> with component only if this entity already exist in the container of entities. If 
 	 * previusly entity with identiefier <code>entity</code> has component with this type it will be 
@@ -1371,13 +1446,15 @@ public class JECS<Component extends Object> implements Runnable
 	 * @param <E> Entity type
 	 * @param <C> Component Type
 	 */
-	@JECSApi(since = "0.1.2")
+	@JECSApi(since = "0.1.2, last = '0.1.8'")
 	public <E extends Number, C extends Component> void replaceOrEmplace(E entity, Class<C> componentT,
 			Object... args) {
 		try {
-			if(contains(entity))
+			if(contains(entity) && has(entity, componentT))
 				replace(entity, componentT, args);
-		    else { 
+			else if(contains(entity)) {
+				emplace(entity, componentT, args);
+			} else { 
 			 	insert(entity.intValue(), size() - 1);
 				emplace(entity, componentT, args);
 		    }
@@ -1406,13 +1483,15 @@ public class JECS<Component extends Object> implements Runnable
 	 * @param <E> Entity type
 	 * @param <C> Component Type
 	 */
-	@JECSApi(since = "0.1.2")
+	@JECSApi(since = "0.1.2, last = '0.1.8'")
 	public <E extends Number, C extends Component> void replaceOrEmplace(E entity, Class<?>[] componentTs,
 			Object[]... argsArray) {
 		try {
-			if(contains(entity))
+			if(contains(entity) && anyArray(entity, componentTs))
 				replace(entity, componentTs, argsArray);
-		    else { 
+			else if(contains(entity)) {
+				emplace(entity, componentTs, argsArray);
+			} else { 
 			 	insert(entity.intValue(), size() - 1);
 				emplace(entity, componentTs, argsArray);
 		    }
@@ -1799,13 +1878,11 @@ public class JECS<Component extends Object> implements Runnable
 	@BetaFeature
 	@JECSApi(since = "0.1.5", funcDesc = "each for all entities with any c")
 	public synchronized <E extends Number, C extends Component> void each(EachCI<C> funcImpl) 
-			throws JECSException
-	{
+			throws JECSException {
 		EachC<C> eachFuncImpl = EachC.create(funcImpl);
 		Iterator<Integer> itr = entities.iterator();	
 		
-		while(itr.hasNext())
-		{
+		while(itr.hasNext()){
 			int entity = itr.next();
 			for(int componentIndex = 0; componentIndex < size(entity); componentIndex++) {
 				@SuppressWarnings("unchecked") //undifiend behaviour if Object not C.
@@ -1814,6 +1891,27 @@ public class JECS<Component extends Object> implements Runnable
 					eachFuncImpl.invoke(entity, component);
 			}
 		}
+	}
+	
+	/**
+     * Returns an iterable object of components on current entity.
+     * <p>
+     * The iterable object returns ComponentSequence that contain set of references to its 
+     * non-empty components. 
+	 * <p>
+	 * This method non type safe, its means to get specific component you need to cast it to
+	 * that exactly type.
+	 *
+     * @note
+     * Empty types aren't explicitly instantiated and therefore they are never
+     * returned during iterations.
+     *
+     * @return An iterable object of components on current entity.
+     */
+	@SuppressWarnings("unchecked")
+	@JECSApi(since = "0.1.7", funcDesc = "range for each")
+	public <E extends Number, C extends Component> ComponentSequence<C> each(E entity) {
+		return (ComponentSequence<C>) container.get(entity);
 	}
 	
 	/**
@@ -1921,6 +2019,35 @@ public class JECS<Component extends Object> implements Runnable
 	@SafeVarargs
 	@JECSApi(since = "0.1.3")
 	public final <E extends Number, C extends Component> boolean any(E entity, Class<? extends C>... componentTs) 
+			throws JECSException {
+		for(int i = 0; i < componentTs.length; i++)
+			if(has(entity, (Class<? extends C>) componentTs[i])) 
+				return true;
+		return false;
+	}
+	
+	/**
+	 * Checks if this entity has at least one of <code>?</code> input components.
+	 * If the entity is not in the container or is negative, invalid, then cause an 
+	 * {@link JECSException}.
+	 * 
+	 * <p>Code snippet for:
+	 * <blockquote><pre> 
+	 * if(has(entity, Component.class) || has(entity, Component2.class || ...)) 
+	 * 	System.out.println("Type contains in container!");
+	 * </blockquote></pre>
+	 * 
+	 * @param <E> Type of entity.
+	 * @param <C> Type of component.
+	 * @param entity - A valid entity identifier.
+	 * @param componentT - Class of component type.
+	 * 
+	 * @return True if at least one type-class of component equals classType.
+	 * @throws JECSException 
+	 */
+	@SuppressWarnings("unchecked")
+	@JECSApi(since = "0.1.8")
+	public final <E extends Number, C extends Component> boolean anyArray(E entity, Class<?>[] componentTs) 
 			throws JECSException {
 		for(int i = 0; i < componentTs.length; i++)
 			if(has(entity, (Class<? extends C>) componentTs[i])) 
@@ -2338,6 +2465,43 @@ public class JECS<Component extends Object> implements Runnable
 	@JECSApi(since = "0.1.1")
 	public int size() {
 		return container.size();
+	}
+	
+	
+    /**
+     * Converts the entity object to identifier {@link NULL_ENTITY}.
+     * 
+     * @param entity - Type of entity identifier.
+     * @return The null representation for the given identifier.
+     */
+	@SuppressWarnings({ "static-access", "unchecked" })
+	@JECSApi(since = "0.1.8")
+	public <E extends Number> E nullEntity(E entity) {
+		return (E) NULL_ENTITY.nullEntity((Integer) entity);
+	}
+	
+	/**
+     * Converts the {@link NULL_ENTITY} identifier to normal entity.
+     * 
+     * @param null_entity - Type of null entity identifier.
+     * @return The not null representation for the given identifier.
+     */
+	@SuppressWarnings({ "static-access", "unchecked" })
+	@JECSApi(since = "0.1.8")
+	public <E extends Number> E entity(E null_entity) {
+		return (E) NULL_ENTITY.entity((Integer) null_entity);
+	}
+	
+	/**
+	 * Checks if this entity is {@link NULL_ENTITY}.
+	 * 
+	 * @param entity - Type of entity identifier.
+	 * @return False if the two elements differ, true otherwise.
+	 */
+	@SuppressWarnings("static-access")
+	@JECSApi(since = "0.1.8")
+	public <E extends Number> boolean isNullEntity(E entity) {
+		return NULL_ENTITY.isNullEntity((Integer) entity);
 	}
 	
 	/**

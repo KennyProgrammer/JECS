@@ -20,6 +20,10 @@ public class ComponentSequenceImpl<Component>
      */
 	public ComponentSequenceImpl() { super(); }
 	
+	public ComponentSequenceImpl<Component> get(){
+		return this;
+	}
+	
 	/**
      * Constructs a sequence containing the elements of the specified
      * collection, in the order they are returned by the collection's

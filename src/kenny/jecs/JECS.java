@@ -30,7 +30,6 @@ import java.util.Map.Entry;
 
 import kenny.jecs.collection.ComponentSequence;
 import kenny.jecs.collection.ComponentSequenceImpl;
-import kenny.jecs.collection.EntityContainer;
 import kenny.jecs.collection.EntityContainerImpl;
 import kenny.jecs.collection.Pair;
 import kenny.jecs.collection.ReversedIterator;
@@ -42,6 +41,8 @@ import kenny.jecs.funcs.DestroyI;
 import kenny.jecs.funcs.Each;
 import kenny.jecs.funcs.EachC;
 import kenny.jecs.funcs.EachCI;
+import kenny.jecs.funcs.EachE;
+import kenny.jecs.funcs.EachEI;
 import kenny.jecs.funcs.EachI;
 
 /**
@@ -88,9 +89,9 @@ import kenny.jecs.funcs.EachI;
  * be recognize for system has a component. 
  * 
  * @author Danil (Kenny) Dukhovenko 
- * @version 0.1.7
+ * @version 0.1.8
  * 
- * TODO: Add multithreading support + bug fixes.
+ * TODO: Bug fixes.
  */
 @JECS.JECSApi(since =  "0.1.8")
 public class JECS<Component extends Object> implements Runnable
@@ -421,7 +422,7 @@ public class JECS<Component extends Object> implements Runnable
 	/**Array of entities for searching to find component of that entity.*/
 	private volatile ArrayList<Integer> entities;
 	/**Container of entity identifiers and sequence of all components identifiers and his data.*/
-	private volatile EntityContainer<Integer, ComponentSequence<Component>> container;
+	private volatile Map<Integer, ComponentSequence<Component>> container;
 	/**Packs of components to store and for better iteration time.*/
 	private volatile Map<Integer, ComponentSequence<Component>> packs;
 	/**Pool store the components each type in different sequence. Pool is efficiently faster then container.*/
@@ -748,11 +749,15 @@ public class JECS<Component extends Object> implements Runnable
 	 */
 	@JECSApi(since = "0.1.2")
 	public final int insert(int entity, int count) {
+		if(contains(entity))
+			return insert(generateEntity(), 1);
+		
+		currentEmplacedEntity = entity;
 		entities.add(entity);
 		
 		// Create components array represents component as data structure for entity.
 		ComponentSequence<Component> components = new ComponentSequenceImpl<Component>();
-		container.emplace(entity, components);
+		container.put(entity, components);
 		return entity;
 	}
 	
@@ -796,7 +801,7 @@ public class JECS<Component extends Object> implements Runnable
 		}
 		
 		pool.clear();
-		container.erase((Integer) entity, components);
+		container.remove((Integer) entity, components);
 		entities.remove((Integer) entity);
 		entityCount = entities.size() - 1;
 		
@@ -901,7 +906,7 @@ public class JECS<Component extends Object> implements Runnable
 			}
 			
 			pool.clear();
-			container.erase(entity, components);
+			container.remove(entity, components);
 			entities.remove((Integer)entity);
 			entityCount = entities.size() - 1;
 		}
@@ -1895,7 +1900,6 @@ public class JECS<Component extends Object> implements Runnable
 			throws JECSException {
 		EachC<C> eachFuncImpl = EachC.create(funcImpl);
 		Iterator<Integer> itr = entities.iterator();	
-		
 		while(itr.hasNext()){
 			int entity = itr.next();
 			for(int componentIndex = 0; componentIndex < size(entity); componentIndex++) {
@@ -1904,6 +1908,39 @@ public class JECS<Component extends Object> implements Runnable
 				if(component != null)
 					eachFuncImpl.invoke(entity, component);
 			}
+		}
+	}
+	
+	/**
+	 * This method iterate over each entity. Each uses {@link EachEI} functional interface as additional parameter. Its 
+	 * allows to add additional properties inside <code>each</code> function for specific entity. 
+	 * <p>
+	 * Basic example:
+	 * <pre>
+	 * system.each(new EachEI() {
+	 *     public void invoke(int entity) {
+	 *        ...
+	 * }});
+	 * </pre>
+	 * More detail about <code>EachEI</code> see in {@link EachE#invoke(int)}.
+	 * <p>
+	 * Lambda Example:
+	 * <pre>
+	 * system.each((entity) -> {
+     *      ...
+     * });
+     *
+	 * </pre>
+	 * @param <E> Entity type.
+	 * @param funcImpl - {@link EachI} function interface, or lambda expression.
+	 */
+	@JECSApi(since = "0.1.8", funcDesc = "iterate over each entity")
+	public <E extends Number> void each(EachEI funcImpl) {
+		EachE eachFuncImpl = EachE.create(funcImpl);
+		Iterator<Integer> itr = entities.iterator();
+		while(itr.hasNext()) {
+			int entity = itr.next();
+			eachFuncImpl.invoke(entity);
 		}
 	}
 	
@@ -2497,10 +2534,9 @@ public class JECS<Component extends Object> implements Runnable
 	 */
 	@JECSApi(since = "0.1.1")
 	public boolean empty() {
-		if(container.isEntity())
+		//if(container.isEntity())
 			return container.isEmpty();
 		
-		return false;
 	}
 	
 	/**

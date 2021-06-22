@@ -293,7 +293,7 @@ public class JECS<Component extends Object> implements Runnable
 		{
 			systems.remove(instance);
 			instance = null;
-			System.gc(); //attempt to clear memory from handle.
+			Runtime.getRuntime().gc(); // Attempt to clear memory from handle.
 			return instance;
 		}
 		
@@ -402,6 +402,17 @@ public class JECS<Component extends Object> implements Runnable
 	static {
 		NULL_ENTITY = new JECS.NULL_ENTITY(); 
 	}
+	
+	@JECSApi(since = "0.1.8")
+	public static final class Group {
+		/**Groupped entity by component / components.*/
+		List<Integer> pool = new ArrayList<Integer>();
+	}
+	
+	@JECSApi(since = "0.1.8")
+	public static final class View {
+		List<Integer> pool = new ArrayList<Integer>();
+	}
 
 	//=========================================
 	//			JECSHandle Class
@@ -427,6 +438,11 @@ public class JECS<Component extends Object> implements Runnable
 	private volatile Map<Integer, ComponentSequence<Component>> packs;
 	/**Pool store the components each type in different sequence. Pool is efficiently faster then container.*/
 	private volatile Map<Class<Component>, List<Pair<Integer, Component>>> pool;
+	/*Instance of entity group by components.**/
+	private Group group = new Group();
+	/*Instance of entity view by components.**/
+	private View view = new View();
+	
 	/**Contains information about this handle.*/
 	private Context context;
 	
@@ -562,15 +578,15 @@ public class JECS<Component extends Object> implements Runnable
 	}
 	
 	/**
-	 * Constructs a newly allocated on the heap {@code JECSHandle} object that represents the specified 
+	 * Constructs a newly allocated on the heap {@code JECS} object that represents the specified 
 	 * {@code container} value or Entity-Component-System handle. This is private constuctor only for <code>construct</code>
 	 * method.
 	 * <p>
 	 * See for constructing {@link #construct}.
-	 * @apiNote If LWJGL 3 Core not loadead, this contructor loads the .dll files.
+	 * @apiNote If LWJGL 3 Core not loadead, this constructor loads the .dll files.
 	 */
 	@JECSApi(funcDesc = "constructor")
-	@Deprecated(since = "use JECSHandle.construct() instead", forRemoval = false)
+	@Deprecated(since = "use JECS.construct() instead", forRemoval = false)
 	private JECS() {
 		Thread thread = new Thread(this, "JECS System Thread");
 		thread.start();
@@ -743,14 +759,14 @@ public class JECS<Component extends Object> implements Runnable
 	 * system.insert(entity, system.size() - 1);
 	 * </pre>
 	 * @param entity - The entity to be inserted.
-	 * @param count - Count order of entity to be created.
+	 * @param globalOrder - Count order of entity to be created.
 	 * 
 	 * @return  Valid entity identifier.
 	 */
 	@JECSApi(since = "0.1.2")
-	public final int insert(int entity, int count) {
+	public final int insert(int entity, int globalOrder) {
 		if(contains(entity))
-			return insert(generateEntity(), 1);
+			return insert(generateEntity(), globalOrder == 1 ? entityCount++ : globalOrder);
 		
 		currentEmplacedEntity = entity;
 		entities.add(entity);
@@ -803,6 +819,11 @@ public class JECS<Component extends Object> implements Runnable
 		pool.clear();
 		container.remove((Integer) entity, components);
 		entities.remove((Integer) entity);
+		if(group.pool.contains(entity))
+			group.pool.remove(entity);
+		if(view.pool.contains(entity))
+			view.pool.remove(entity);
+		
 		entityCount = entities.size() - 1;
 		
 		// Is entity doesn't exist, that its succesfful removed and retuned -1. 
@@ -1966,6 +1987,114 @@ public class JECS<Component extends Object> implements Runnable
 	}
 	
 	/**
+	 * Non-owning group. 
+	 * <p>
+	 * Creates the group by checking all typed compoents on all entities, and
+	 * if some entity has given components its put to group pool, otherwise that entity will be
+	 * skipped.
+	 * <p>
+	 * A non-owning group returns all entities and only the entities that have at
+	 * least the given components.
+	 * <p>
+	 * Groups share references to the underlying data structures/classes of the context
+	 * that generated them. Therefore any change to the entities and to the components made by means
+	 * of the registry are immediately reflected by all the groups.
+	 * Moreover, sorting a non-owning group affects all the instances of the same
+	 * group (it means that users don't have to call <code>sort</code> on each instance to sort
+	 * all of them because they share entities and components).
+	 * <p>
+	 * Lifetime of a group must not overcome that of the context that generated it.
+	 * In any other case, attempting to use a group results in undefined behavior.
+	 *
+	 * @param components Exclude Types of components used to filter the group.
+	 * @returns The only that entities that has given components.
+	 */
+	@JECSApi(since = "0.1.8", funcDesc = "group entity by components")
+	public <E extends Number, C extends Component> List<Integer> group(@SuppressWarnings("unchecked") 
+		Class<? extends C>... components) {
+		group.pool.clear();
+		Iterator<Integer> itr = entities.iterator();
+		while(itr.hasNext()) {
+			int entity = itr.next();
+			if(has(entity, components))
+				group.pool.add(entity);
+		}
+		
+		return group.pool;
+	}
+	
+	/**
+	 * View.
+	 * <p>
+	 * Creates the view by checking one type component on all entities, and
+	 * if some entity has given component its put to view pool, otherwise that entity will be
+	 * skipped.
+	 * <p>
+	 * A view returns all entities and only the entities that have at least the given components.
+	 * <p>
+	 * Difference with {@link #group(Class...)} that is this method is faster when user wan't to
+	 * iterate over all entities with one type component, but not with all types, that is increase
+	 * iteration perfomance and in finally should be faster.
+	 * 
+	 * @param component Exclude Type of component used to filter the view.
+	 * @returns The only that entities that has component with given type.
+	 */
+	@JECSApi(since = "0.1.8", funcDesc = "view entities by one type component")
+	public <E extends Number, C extends Component> List<Integer> view(Class<C> component) {
+		view.pool.clear();
+		Iterator<Integer> itr = entities.iterator();
+		while(itr.hasNext()) {
+			int entity = itr.next();
+			if(has(entity, component))
+				view.pool.add(entity);
+		}
+		
+		return view.pool;
+	}
+
+	/**
+	 * Find first entity in entities container with input <code>C</code> component and return it. If no one entity hasn't this
+	 * component its returns -1.
+	 * 
+	 * @param component - Type of component.
+	 * @param <E> - Exclude type of entity.
+	 * @param <C> - Exclude type of component.
+	 * @return The entity with finded component.
+	 */
+	@JECSApi(since = "0.1.8", funcDesc = "find entity by component")
+	public <E extends Number, C extends Component> Integer find(Class<? extends C> component) {
+		Iterator<Integer> itr = entities.iterator();
+		while(itr.hasNext()) {
+			int entity = itr.next();
+			if(has(entity, component))
+				return entity;
+		}
+		return -1;
+	}
+	
+	/**
+	 * Find last entity in entities container with input <code>C</code> component and return it. If no one entity hasn't this
+	 * component its returns -1.
+	 * 
+	 * @param component - Type of component.
+	 * @param <E> - Exclude type of entity.
+	 * @param <C> - Exclude type of component.
+	 * @return The last entity with finded component.
+	 */
+	@JECSApi(since = "0.1.8", funcDesc = "find last entity by component")
+	public <E extends Number, C extends Component> Integer findLast(Class<? extends C> component) {
+		Iterator<Integer> itr = entities.iterator();
+		int entity = -1;
+		while(itr.hasNext()) {
+			if(has(itr.next(), component)) {
+				entity = itr.next();
+				continue;
+			}
+		}
+		return entity;
+	}
+
+	/**
 	 * Checks if this entity has <code>C</code> component data by its type and return true 
 	 * otherwise false. 
 	 * <p>
@@ -2313,7 +2442,7 @@ public class JECS<Component extends Object> implements Runnable
 	 *
 	 * @param <E> Type of entity. 
 	 * @param <C> Type of component.
-	 * @param <Group> Group / array of returned components.
+	 * @param <G> Group / array of returned components.
 	 * @param componentT - Its of type of class like <code>String.class</code>.
 	 * @return Already casted to (C) object from clas type, so you don't need to cast 
 	 * it to (C).
@@ -2324,16 +2453,16 @@ public class JECS<Component extends Object> implements Runnable
 	@SuppressWarnings("unchecked")
 	@SafeVarargs
 	@JECSApi(since = "0.1.2")
-	public final <E extends Number, C extends Component, Group extends Component> Group[] 
+	public final <E extends Number, C extends Component, G extends Component> G[] 
 			get(E entity, Class<? extends C>... componentTs) throws JECSException {
-		final List<Group> group = new ArrayList<Group>();
+		final List<G> group = new ArrayList<G>();
 		for(int i = 0; i < componentTs.length; i++) {
 			Class<? extends C> componentT = (Class<? extends C>)componentTs[i]; 
 			Component component = get(entity, componentT);
 			if(component != null)
-				group.add((Group) component);
+				group.add((G) component);
 		}
-		return (Group[]) group.toArray();
+		return (G[]) group.toArray();
 	}
 
 	/**

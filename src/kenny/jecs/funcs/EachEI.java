@@ -20,7 +20,7 @@ public interface EachEI
 	/**
 	 * This method implements the {@link kenny.jecs.JECS#each(EachEI)}. Its allows
 	 * to add additional properties inside <code>each</code> function. This method can also be 
-	 * used as a lambda expression. For example, in the body of a method/lambda, you can manage/sort/serizlize entities and call specific
+	 * used as a lambda expression. For example, in the body of a method/lambda, you can manage components and call specific
 	 * methods for each entity.
 	 * <p>
 	 * Example code:

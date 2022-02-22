@@ -1022,7 +1022,7 @@ public class JECS<Component extends Object> implements Runnable
 	 * @throws IllegalAccessException Invalid access.
 	 * @throws InstantiationException Invalid initialization.
 	 */
-	@SuppressWarnings("unchecked")
+	@SuppressWarnings({ "unchecked", "unused" })
 	@JECSApi(since = "0.1.3, last = 0.1.7", funcDesc = "constructFromArgs obj")
 	private final <E extends Number, C extends Component> C constructFromArgs(Class<C> componentT, Object... args) 
 			throws JECSException, SecurityException, 
@@ -1031,7 +1031,16 @@ public class JECS<Component extends Object> implements Runnable
 		
 		// This arguments will be pass to get currect costructor and invoke it.
 		Class<?>[] finalCtorArgs = null;
-	
+		if(args.length == 1) {
+			if(args[0].getClass().isArray()) {
+				Object[] argss = (Object[]) args[0];
+				Object[] newargs = new Object[argss.length];
+				for(int i = 0; i < argss.length; i++)
+					newargs[i] = argss[i];
+				args = newargs;
+			}
+		}
+		
 		// Top level class info if componentT is member.
 		Class<?> enclosingClassInfo = componentT.getEnclosingClass();
 		boolean isInnerClass = enclosingClassInfo != null;
@@ -1099,6 +1108,7 @@ public class JECS<Component extends Object> implements Runnable
 						}
 						
 						Class<?> passedArg = args[argIdx - argShift].getClass();
+											
 						// Interface/annotation situation.
 						if(arg.isInterface()) {
 							if(safeAsSubClass(passedArg, arg, baseMsg + 

@@ -1,38 +1,39 @@
 package kenny.jecs.funcs;
 
 /**
- * Implementation for {@link DestroyI}. Implements a single {@link #invoke(int)}
+ * Implementation for {@link IDestroy}. Implements a single {@link #invoke(int)}
  * function.
  */
-@kenny.jecs.funcs.EachI.JECSApi(since = "0.1.5")
-public abstract class Destroy implements DestroyI
+@kenny.jecs.funcs.IEach.JECSApi(since = "0.1.5")
+public abstract class Destroy<EntityT> implements IDestroy<EntityT>
 {
 	/**
-	 * Construct the {@link DestroyI} function implementation. 
+	 * Construct the {@link IDestroy} function implementation. 
 	 * 
 	 * @return Returns a {@link Function} that contains the entire implementation of the
 	 * functional interface.
 	 */
-	public static final Destroy create(DestroyI destroyI){
-		return new Function(destroyI);
+	public static final <Entity extends Number> Destroy<Entity> 
+		create(IDestroy<Entity> destroyI){
+		return new Function<Entity>(destroyI);
 	}
 	
 	/**
-	 * Represent a single {@link DestroyI#invoke(int)} function.
+	 * Represent a single {@link IDestroy#invoke(int)} function.
 	 */
-	@kenny.jecs.funcs.EachI.JECSApi(since = "0.1.5")
-    private static final class Function extends Destroy
+	@kenny.jecs.funcs.IEach.JECSApi(since = "0.1.5")
+    private static final class Function<EntityT> extends Destroy<EntityT>
     {
-    	private final DestroyI destroyI;
+    	private final IDestroy<EntityT> destroyI;
     	
-		Function(DestroyI destroyI) {
+		Function(IDestroy<EntityT> destroyI) {
 			super();
     		this.destroyI = destroyI;
  
         }
     	
         @Override
-        public final void invoke(int entity) {
+        public final void invoke(EntityT entity) {
         	destroyI.invoke(entity);
         }
     }

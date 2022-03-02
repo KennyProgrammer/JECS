@@ -1,38 +1,39 @@
 package kenny.jecs.funcs;
 
 /**
- * Implementation for {@link CreateI}. Implements a single {@link #invoke(int)}
+ * Implementation for {@link ICreate}. Implements a single {@link #invoke(int)}
  * function.
  */
-@kenny.jecs.funcs.EachI.JECSApi(since = "0.1.5")
-public abstract class Create implements CreateI
+@kenny.jecs.funcs.IEach.JECSApi(since = "0.1.5")
+public abstract class Create<EntityT> implements ICreate<EntityT>
 {
 	/**
-	 * Construct the {@link CreateI} function implementation. 
+	 * Construct the {@link ICreate} function implementation. 
 	 * 
 	 * @return Returns a {@link Function} that contains the entire implementation of the
 	 * functional interface.
 	 */
-	public static final Create create(CreateI createI){
-		return new Function(createI);
+	public static final <Entity extends Number> Create<Entity> 
+		create(ICreate<Entity> createI){
+		return new Function<Entity>(createI);
 	}
 	
 	/**
-	 * Represent a single {@link EachI#invoke(int)} function.
+	 * Represent a single {@link IEach#invoke(int)} function.
 	 */
-	@kenny.jecs.funcs.EachI.JECSApi(since = "0.1.5")
-    private static final class Function extends Create
+	@kenny.jecs.funcs.IEach.JECSApi(since = "0.1.5")
+    private static final class Function<EntityT> extends Create<EntityT>
     {
-    	private final CreateI createI;
+    	private final ICreate<EntityT> createI;
     	
-		Function(CreateI createI) {
+		Function(ICreate<EntityT> createI) {
 			super();
     		this.createI = createI;
  
         }
     	
         @Override
-        public final void invoke(int entity) {
+        public final void invoke(EntityT entity) {
         	createI.invoke(entity);
         }
     }

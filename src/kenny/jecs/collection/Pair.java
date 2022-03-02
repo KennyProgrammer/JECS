@@ -1,8 +1,7 @@
 package kenny.jecs.collection;
 
-import java.util.Iterator;
 
-public class Pair<A, B> implements Iterable<A>
+public class Pair<A, B> implements Comparable<A>
 {
 	public A first;
 	public B second;
@@ -32,18 +31,24 @@ public class Pair<A, B> implements Iterable<A>
 		this.second = second;
 	}
 	
-	@Override
-	public Iterator<A> iterator() {
-		return null;
-	}
-	
-	public Iterator<B> iteratorB() {
-		return null;
-	}
+	//@Override
+	//public Iterator<A> iterator() {
+	//	return null;
+	//}
+	//
+	//public Iterator<B> iteratorB() {
+	//	return null;
+	//}////
 
 	@Override
 	public String toString() {
 		return "[" + first + ", " + second + "]";
+	}
+
+	@Override
+	public int compareTo(A o) {
+		// TODO Auto-generated method stub
+		return 0;
 	}
 
 }

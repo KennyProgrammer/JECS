@@ -1,22 +1,17 @@
 # JECS
-![JECS](.github/Logo.png?raw=true "JECS - Java Entity Component System")
+![JECS](.github/Logo.png?raw=true "JECS - Entity Component System")
 
-<code>JECS</code> or <b>Java Entity-Component-System API</b> this is a small system that holds all entity identifiers in a single object 
+<code>JECS</code> or <b>Java Entity Component System</b> this is a small system that holds all entity identifiers in a single object 
 as well as their component identifiers. It makes it easy to create entities, put a component in it, and when it is not needed, it is also
 easy to delete it without leaving the object in memory.
-<p>
-This is not the best solution for sorting entities and components around the world, I am  sure there are better solutions in other languages
-like C++ and Entt, but I have not seen similar systems in Java.
-<p>
-<b>Entity</b> The entity is a general purpose object. Usually, it only consists of a unique id. They "tag every coarse gameobject as a 
-separate item". Implementations typically use a plain integer for this. <p>
-<b>Component</b> the raw data for one aspect of the object, and how it interacts with the world. "Labels the Entity as possessing this 
-particular aspect". Implementations typically use structs, classes, or associative arrays. <p>
-<b>System</b> "Each System runs continuously (as though each System had its own private thread) and performs global actions on every 
-Entity that possesses a Component of the same aspect as that System."
+   
+This is not the best solution for sorting entities and components around the world. This is a library written using the same template and style as 
+`Entt` written in C++. Only `JECS` is just trying to repeat what `Entt` can, and has a similar syntax. But the implementation is completely 
+different. Therefore, if you need speed, then use memory, if not, then try `JECS`.
 
 # Documentation
-	
+
+* [What is Entity Component System](#what-is-entity-component-system)
 * [Example](#example)
 * [System design](#system-design)
   * [User-side control](#user-side-control)
@@ -41,9 +36,19 @@ Entity that possesses a Component of the same aspect as that System."
    * [Profiling](#profiling)
    * [Context](#context)
 
+# What is Entity Component System
+Entity Component System (ECS) - is a software architectural pattern mostly used on video game development for the storage of game world objects. An ECS follows the pattern of "entities" with "components" of data.   
+   
+An ECS follows the principle of composition over inheritance, meaning that every entity is defined not by a "type", but by the components that are associated with it. The 
+design of how components relate to entities depend upon the Entity Component System being used.   
+**Entity** The entity is a general purpose object. Usually, it only consists of a unique id. They "tag every coarse gameobject as a 
+separate item". Implementations typically use a plain integer for this.   
+**Component** the raw data for one aspect of the object, and how it interacts with the world. "Labels the Entity as possessing this 
+particular aspect". Implementations typically use structs, classes, or associative arrays.   
+**System** "Each System runs continuously (as though each System had its own private thread) and performs global actions on every 
+Entity that possesses a Component of the same aspect as that System."
 	
 # Example: 
-Old example, soon post updated.
 ```java
 package kenny.jecs.test;
 import kenny.jecs.JECS;
